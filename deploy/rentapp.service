@@ -1,0 +1,16 @@
+[Unit]
+Description=NAMA Rent App
+After=network.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=__APP_DIR__/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node dist/server.cjs
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
