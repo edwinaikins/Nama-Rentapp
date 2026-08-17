@@ -766,8 +766,12 @@ export default function App() {
       setUserEmail(result.user.email);
       setCurrentView("DASHBOARD");
     } catch (err: any) {
-      console.error("Popup blocked or dismissed during Google sign-in:", err);
-      setAuthError("Google Sign-In popup was blocked or dismissed. Please ensure your browser allows popups for this site, or sign in using your email and password.");
+      console.error("Google sign-in error:", err);
+      let errMsg = "Google Sign-In popup was blocked or dismissed. Please allow popups for this site, or sign in using your email and password.";
+      if (err.code === "auth/unauthorized-domain") {
+        errMsg = "Google Sign-In isn't available on this address yet (Google requires a real domain with HTTPS, not a bare IP). Please sign in using your email and password instead.";
+      }
+      setAuthError(errMsg);
     } finally {
       setAuthLoading(false);
     }
