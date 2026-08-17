@@ -14,7 +14,7 @@ import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail 
 } from "firebase/auth";
 import { 
-  Building2, ShieldAlert, Sparkles, Building, LogIn, CheckCircle, 
+  Building2, ShieldAlert, Building, LogIn, CheckCircle,
   HelpCircle, Info, Landmark, HelpCircle as HelpIcon,
   Mail, Lock, User, UserPlus, ArrowLeft, RefreshCw, Eye, EyeOff
 } from "lucide-react";
@@ -1305,10 +1305,6 @@ export default function App() {
             <span className="flex items-center gap-1.5">
               <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full"></div>
               ID: NMA-ADMIN-AF-2026
-            </span>
-            <span>•</span>
-            <span className="text-indigo-400 flex items-center gap-0.5 font-bold">
-              <Sparkles className="w-3 h-3 fill-current animate-pulse" /> Gemini AI
             </span>
           </div>
         </div>

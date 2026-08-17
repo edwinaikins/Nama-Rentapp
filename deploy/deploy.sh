@@ -36,8 +36,8 @@ git reset --hard origin/main
 
 if [ ! -f "${APP_DIR}/.env" ]; then
   echo "ERROR: ${APP_DIR}/.env is missing." >&2
-  echo "Create it first with the app's real secrets (GEMINI_API_KEY, VITE_FIREBASE_API_KEY," >&2
-  echo "WIGAL_API_KEY, WIGAL_USERNAME, WIGAL_SENDER_ID, APP_URL) before deploying. See .env.example." >&2
+  echo "Create it first with the app's real secrets (VITE_FIREBASE_API_KEY, WIGAL_API_KEY," >&2
+  echo "WIGAL_USERNAME, WIGAL_SENDER_ID, APP_URL) before deploying. See .env.example." >&2
   exit 1
 fi
 

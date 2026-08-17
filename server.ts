@@ -2,7 +2,6 @@ import express from "express";
 import path from "path";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
 import { sendWigalV3Sms } from "./src/services/wigalSmsUtility";
 
 // Load environment variables
@@ -14,27 +13,6 @@ const PORT = 3000;
 // Enable large JSON payloads for Base64 image transfers
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
-
-// Lazy-initialize Gemini API
-let aiClient: GoogleGenAI | null = null;
-
-function getGeminiClient(): GoogleGenAI {
-  if (!aiClient) {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
-      console.warn("WARNING: GEMINI_API_KEY environment variable is not set. Workflow parsing will run in dry-run mode.");
-    }
-    aiClient = new GoogleGenAI({
-      apiKey: key || "MOCK_KEY",
-      httpOptions: {
-        headers: {
-          "User-Agent": "aistudio-build",
-        },
-      },
-    });
-  }
-  return aiClient;
-}
 
 // API Routes
 

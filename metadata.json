@@ -1,6 +1,5 @@
 {
   "name": "NAMA RENT APP",
   "description": "A secure digital registration, allocation, and tenancy lease management system for municipal assets and properties.",
-  "requestFramePermissions": ["camera"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "requestFramePermissions": ["camera"]
 }
