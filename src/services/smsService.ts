@@ -1,4 +1,4 @@
-import { db, handleFirestoreError, OperationType } from "../firebase";
+import { db, auth, handleFirestoreError, OperationType } from "../firebase";
 import { SmsLog } from "../types";
 import { setDoc, doc } from "firebase/firestore";
 
@@ -89,9 +89,18 @@ export async function sendSMSAndLog(to: string, message: string, categoryId?: st
   let senderId: number | string | undefined;
 
   try {
+    // The SMS relay now requires a signed-in staff session (see server.ts).
+    const idToken = await auth.currentUser?.getIdToken();
+    if (!idToken) {
+      throw new Error("You must be signed in to send an SMS notification.");
+    }
+
     const response = await fetch("/api/send-sms", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${idToken}`
+      },
       body: JSON.stringify({ to, message: customizedMessage })
     });
 

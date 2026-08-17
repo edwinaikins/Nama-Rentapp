@@ -328,10 +328,6 @@ export default function SettingsPanel({ categories, users, onUpdate, onClose, ag
   };
   
   // User Management states
-  const [newUserEmail, setNewUserEmail] = useState("");
-  const [newUserName, setNewUserName] = useState("");
-  const [newUserRole, setNewUserRole] = useState<UserRole>("REGISTRAR");
-  const [userSaving, setUserSaving] = useState(false);
   const [userDeleteId, setUserDeleteId] = useState<string | null>(null);
   const [assignedRoles, setAssignedRoles] = useState<Record<string, UserRole>>({});
   
@@ -483,112 +479,73 @@ export default function SettingsPanel({ categories, users, onUpdate, onClose, ag
     }
   };
 
-  // Save New User Role to Firestore
-  const handleSaveUser = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Approve and activate a pending user. Profiles are keyed by the staff
+  // member's own Firebase Auth UID (required by firestore.rules — a Super
+  // Admin cannot create a profile on someone else's behalf, only approve
+  // one that person has already self-registered).
+  const handleApproveUser = async (user: PortalUser, role: UserRole) => {
     setErrorMessage("");
     setMessage("");
 
-    if (!newUserName.trim() || !newUserEmail.trim()) {
-      setErrorMessage("Please complete the name and email fields.");
-      return;
-    }
-
-    const cleanEmail = newUserEmail.trim().toLowerCase();
-    
-    // Simple email regex validation
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      setErrorMessage("Please enter a valid email address.");
-      return;
-    }
-
-    setUserSaving(true);
-    const userId = cleanEmail.replace(/\./g, "_");
-
-    const newUser: PortalUser = {
-      email: cleanEmail,
-      name: newUserName.trim(),
-      role: newUserRole,
-      createdAt: new Date().toISOString(),
-      status: "ACTIVE"
-    };
-
-    try {
-      await setDoc(doc(db, "users", userId), newUser);
-      setUserSaving(false);
-      setMessage(`Successfully saved staff user "${newUser.name}" with role ${newUser.role}!`);
-      setNewUserEmail("");
-      setNewUserName("");
-      setNewUserRole("REGISTRAR");
-      onUpdate();
-    } catch (err) {
-      setUserSaving(false);
-      setErrorMessage("Failed to write user profile to database.");
-      handleFirestoreError(err, OperationType.CREATE, `users/${userId}`);
-    }
-  };
-
-  // Approve and activate a pending user
-  const handleApproveUser = async (email: string, role: UserRole) => {
-    setErrorMessage("");
-    setMessage("");
-    const userId = email.replace(/\./g, "_");
-    
-    // Find original user info
-    const originalUser = users.find(u => u.email === email);
-    if (!originalUser) {
-      setErrorMessage("Could not locate registration info for this user.");
+    if (!user.uid) {
+      setErrorMessage("Could not locate the account UID for this registration.");
       return;
     }
 
     try {
       const updatedUser: PortalUser = {
-        ...originalUser,
+        ...user,
         role: role,
         status: "ACTIVE"
       };
-      await setDoc(doc(db, "users", userId), updatedUser);
-      setMessage(`Successfully approved and activated account for "${originalUser.name}" as ${role.replace("_", " ")}!`);
+      await setDoc(doc(db, "users", user.uid), updatedUser);
+      setMessage(`Successfully approved and activated account for "${user.name}" as ${role.replace("_", " ")}!`);
       onUpdate();
     } catch (err) {
       setErrorMessage("Failed to activate user account.");
-      handleFirestoreError(err, OperationType.UPDATE, `users/${userId}`);
+      handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
     }
   };
 
   // Reject/Delete a pending user
-  const handleRejectUser = async (email: string) => {
+  const handleRejectUser = async (user: PortalUser) => {
     setErrorMessage("");
     setMessage("");
-    const userId = email.replace(/\./g, "_");
+    if (!user.uid) {
+      setErrorMessage("Could not locate the account UID for this registration.");
+      return;
+    }
     try {
-      await deleteDoc(doc(db, "users", userId));
-      setMessage(`Registration request for "${email}" was rejected and removed.`);
+      await deleteDoc(doc(db, "users", user.uid));
+      setMessage(`Registration request for "${user.email}" was rejected and removed.`);
       onUpdate();
     } catch (err) {
       setErrorMessage("Failed to reject registration request.");
-      handleFirestoreError(err, OperationType.DELETE, `users/${userId}`);
+      handleFirestoreError(err, OperationType.DELETE, `users/${user.uid}`);
     }
   };
 
   // Delete User Role from Firestore
-  const handleDeleteUser = async (email: string) => {
-    if (email.toLowerCase() === "edwin@zamsonia.com") {
+  const handleDeleteUser = async (user: PortalUser) => {
+    if (user.email.toLowerCase() === "edwinaikins@gmail.com") {
       setErrorMessage("Cannot delete the core administrator account.");
       return;
     }
-    
+    if (!user.uid) {
+      setErrorMessage("Could not locate the account UID for this staff user.");
+      return;
+    }
+
     setErrorMessage("");
     setMessage("");
-    const userId = email.replace(/\./g, "_");
 
     try {
-      await deleteDoc(doc(db, "users", userId));
-      setMessage(`Successfully removed staff user "${email}".`);
+      await deleteDoc(doc(db, "users", user.uid));
+      setMessage(`Successfully removed staff user "${user.email}".`);
       onUpdate();
     } catch (err) {
-      setErrorMessage(`Failed to delete user: ${email}`);
-      handleFirestoreError(err, OperationType.DELETE, `users/${userId}`);
+      setErrorMessage(`Failed to delete user: ${user.email}`);
+      handleFirestoreError(err, OperationType.DELETE, `users/${user.uid}`);
     }
   };
 
@@ -1235,14 +1192,14 @@ export default function SettingsPanel({ categories, users, onUpdate, onClose, ag
                             <div className="flex items-center gap-2 pt-4 md:pt-0">
                               <button
                                 type="button"
-                                onClick={() => handleApproveUser(u.email, currentAssignedRole)}
+                                onClick={() => handleApproveUser(u, currentAssignedRole)}
                                 className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow shadow-emerald-100 transition-colors"
                               >
                                 Approve & Activate
                               </button>
                               <button
                                 type="button"
-                                onClick={() => handleRejectUser(u.email)}
+                                onClick={() => handleRejectUser(u)}
                                 className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl transition-colors border border-rose-200/50"
                               >
                                 Reject Request
@@ -1256,62 +1213,21 @@ export default function SettingsPanel({ categories, users, onUpdate, onClose, ag
                 )}
               </div>
 
-              {/* SECTION B: ACTIVE ROLES AND ADD USER */}
+              {/* SECTION B: ACTIVE ROLES */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                {/* Add User Form */}
-                <form onSubmit={handleSaveUser} className="lg:col-span-5 bg-white border border-slate-150 p-5 rounded-2xl space-y-4 shadow-sm">
+                {/* How staff get added */}
+                <div className="lg:col-span-5 bg-white border border-slate-150 p-5 rounded-2xl space-y-3 shadow-sm">
                   <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-100 pb-2.5">
                     <User className="w-4 h-4 text-indigo-700" />
-                    Manually Add Staff Profile
+                    How Staff Accounts Are Added
                   </h4>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Staff Full Name</label>
-                    <input
-                      type="text"
-                      required
-                      value={newUserName}
-                      onChange={e => setNewUserName(e.target.value)}
-                      placeholder="e.g. Amma Osei"
-                      className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none text-xs focus:border-indigo-500"
-                    />
+                  <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-100 text-[11px] text-slate-500 flex gap-2">
+                    <Info className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                    <p className="leading-relaxed">
+                      Staff can no longer be pre-provisioned from this panel — for security, every account must be created by the staff member themselves via the login screen's "Register" or "Sign in with Google" option first. It will then appear above under <strong>Pending Registration Requests</strong>, where you approve it, assign its final role, and activate it.
+                    </p>
                   </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Primary Email Address</label>
-                    <input
-                      type="email"
-                      required
-                      value={newUserEmail}
-                      onChange={e => setNewUserEmail(e.target.value)}
-                      placeholder="e.g. osei@nsawam.gov.gh"
-                      className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none text-xs focus:border-indigo-500 font-mono"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Functional Role & Security Clearance</label>
-                    <select
-                      value={newUserRole}
-                      onChange={e => setNewUserRole(e.target.value as UserRole)}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none text-xs bg-white font-semibold text-slate-700"
-                    >
-                      <option value="REGISTRAR">Registrar (Register Customers & Assets)</option>
-                      <option value="LEASING_OFFICER">Leasing Officer (Allocate & Generate Contract)</option>
-                      <option value="FINANCIAL_OFFICER">Financial Officer (Installments & Track Payments)</option>
-                      <option value="SUPER_USER">Super User (Full Administrative Control)</option>
-                    </select>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={userSaving}
-                    className="w-full py-2.5 bg-indigo-900 hover:bg-indigo-850 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-indigo-100 flex items-center justify-center gap-1.5"
-                  >
-                    <Plus className="w-4 h-4" />
-                    {userSaving ? "Adding Profile..." : "Add Staff User"}
-                  </button>
-                </form>
+                </div>
 
                 {/* Users List */}
                 <div className="lg:col-span-7 bg-white border border-slate-150 rounded-2xl shadow-sm overflow-hidden">
@@ -1325,8 +1241,8 @@ export default function SettingsPanel({ categories, users, onUpdate, onClose, ag
 
                   <div className="divide-y divide-slate-100 max-h-[360px] overflow-y-auto">
                     {activeUsers.map(u => {
-                      const isCoreAdmin = u.email.toLowerCase() === "edwin@zamsonia.com";
-                      
+                      const isCoreAdmin = u.email.toLowerCase() === "edwinaikins@gmail.com";
+
                       return (
                         <div key={u.email} className="p-4 flex items-center justify-between gap-4 hover:bg-slate-50/40 transition-colors">
                           <div className="min-w-0">
@@ -1344,9 +1260,12 @@ export default function SettingsPanel({ categories, users, onUpdate, onClose, ag
                                 value={u.role}
                                 onChange={async (e) => {
                                   const newRole = e.target.value as UserRole;
-                                  const userId = u.email.replace(/\./g, "_");
+                                  if (!u.uid) {
+                                    setErrorMessage("Could not locate the account UID for this staff user.");
+                                    return;
+                                  }
                                   try {
-                                    await setDoc(doc(db, "users", userId), { ...u, role: newRole });
+                                    await setDoc(doc(db, "users", u.uid), { ...u, role: newRole });
                                     setMessage(`Successfully updated role of ${u.name} to ${getRoleLabel(newRole)}.`);
                                     onUpdate();
                                   } catch (err) {
@@ -1365,7 +1284,7 @@ export default function SettingsPanel({ categories, users, onUpdate, onClose, ag
                             <button
                               type="button"
                               disabled={isCoreAdmin}
-                              onClick={() => handleDeleteUser(u.email)}
+                              onClick={() => handleDeleteUser(u)}
                               className="p-1.5 hover:bg-red-50 text-slate-300 hover:text-red-500 rounded-lg transition-all disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-slate-300"
                               title={isCoreAdmin ? "Cannot delete core admin account" : "Remove Staff Account"}
                             >

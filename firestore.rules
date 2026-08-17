@@ -2,29 +2,69 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Staff directory. Read stays open (no `if false` gate) because the
-    // sign-up and forgot-password screens need to check for an existing
-    // account by email *before* the visitor is signed in, so Firebase
-    // Auth isn't populated yet at that point. Writes require sign-in,
-    // which blocks anonymous internet users from creating, editing, or
-    // deleting staff accounts (the previous rule allowed this).
-    //
-    // Known gap: because this collection is publicly readable, staff
-    // emails/names/roles are visible to anyone with the project's config.
-    // Tightening this further would mean moving the duplicate-email and
-    // account-existence checks into a Cloud Function instead of a direct
-    // client read — a larger change, out of scope for this pass.
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // My own staff profile, keyed by my Firebase Auth UID (not email —
+    // Firestore rules can't safely transform request.auth.token.email
+    // into a sanitized doc ID, so UID is the only reliable key to look
+    // ourselves up by).
+    function myProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function hasProfile() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isSuperUser() {
+      return hasProfile() && myProfile().data.status == 'ACTIVE' && myProfile().data.role == 'SUPER_USER';
+    }
+
+    // Any signed-in, approved (ACTIVE) staff account — any role.
+    function isActiveStaff() {
+      return hasProfile() && myProfile().data.status == 'ACTIVE';
+    }
+
+    function isStaff() {
+      return isSuperUser() || isActiveStaff();
+    }
+
     match /users/{userId} {
+      // Read stays open (not gated behind sign-in): the sign-up screen
+      // needs to check whether an email is already registered, and
+      // forgot-password needs to check an account exists, both BEFORE
+      // the visitor has a Firebase Auth session. Known, deliberate gap:
+      // staff emails/names/roles are visible to anyone with the app's
+      // config. Tightening further would mean moving those two checks
+      // into a Cloud Function instead of a direct client read.
       allow read: if true;
-      allow write: if request.auth != null;
+
+      // A signed-in user may create ONLY their own profile document (its
+      // ID must equal their own UID), and it must always start at the
+      // lowest privilege level with PENDING status. This covers both a
+      // brand-new self-registration AND the one-time migration of a
+      // pre-existing account into this UID-keyed scheme — either way, a
+      // Super Admin must approve and assign the real role afterward,
+      // exactly like a new hire. This can never be used to grant
+      // yourself an elevated role or ACTIVE status.
+      allow create: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.status == 'PENDING'
+        && request.resource.data.role in ['REGISTRAR', 'LEASING_OFFICER', 'FINANCIAL_OFFICER'];
+
+      // Only an approved Super Admin can approve/reject/edit/delete any
+      // staff record, including changing someone's role or status.
+      allow update, delete: if isSuperUser();
     }
 
     // Everything else (tenant applications, assets, SMS logs, rent
-    // settings, templates, etc.) requires a signed-in Firebase Auth
-    // session for both read and write. This app has no public-facing
-    // flow — all registration and management happens after staff log in.
+    // settings, templates, etc.) requires a signed-in, ACTIVE staff
+    // session — not merely "signed in", which was the previous gap that
+    // let a still-PENDING self-registered account read/write live data.
     match /{document=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isStaff();
     }
   }
 }

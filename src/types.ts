@@ -108,6 +108,7 @@ export interface Application {
 export type UserRole = "REGISTRAR" | "LEASING_OFFICER" | "FINANCIAL_OFFICER" | "SUPER_USER";
 
 export interface PortalUser {
+  uid?: string; // Firebase Auth UID — also the Firestore document ID for this profile
   email: string;
   name: string;
   role: UserRole;

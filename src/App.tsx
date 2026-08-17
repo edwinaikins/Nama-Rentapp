@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Category, Application, ApplicationStatus, Asset, PortalUser, UserRole, Setting, SmsLog, SmsTemplatesSetting, AllocationLetterSetting, RentRatesSetting, RentBillTemplateSetting, GlobalSignatureSetting } from "./types";
-import { DEFAULT_SEED_CATEGORIES, DEFAULT_SEED_ASSETS, DEFAULT_SEED_USERS, DEFAULT_AGREEMENT_TEMPLATE, DEFAULT_SMS_TEMPLATES, DEFAULT_ALLOCATION_LETTER_TEMPLATE, DEFAULT_RENT_RATES, DEFAULT_RENT_BILL_TEMPLATE, DEFAULT_GLOBAL_SIGNATURE, DEFAULT_SEED_APPLICATIONS } from "./data";
+import { DEFAULT_SEED_CATEGORIES, DEFAULT_SEED_ASSETS, DEFAULT_AGREEMENT_TEMPLATE, DEFAULT_SMS_TEMPLATES, DEFAULT_ALLOCATION_LETTER_TEMPLATE, DEFAULT_RENT_RATES, DEFAULT_RENT_BILL_TEMPLATE, DEFAULT_GLOBAL_SIGNATURE, DEFAULT_SEED_APPLICATIONS } from "./data";
 import OverviewDashboard from "./components/OverviewDashboard";
 import MunicipalLogo from "./components/MunicipalLogo";
 import RegistrationForm from "./components/RegistrationForm";
@@ -39,6 +39,9 @@ export default function App() {
   const [userEmail, setUserEmail] = useState<string | null>(() => {
     return localStorage.getItem("credential_user_email") || null;
   });
+  // The signed-in Firebase Auth UID — this, not email, is the key used to
+  // look up "my own" staff profile in Firestore (see firestore.rules).
+  const [authUid, setAuthUid] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   
   // User Management RBAC state definitions
@@ -507,7 +510,12 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // Synchronize Portal Users from Firestore in real-time
+  // Synchronize Portal Users from Firestore in real-time. This list is used
+  // for display (Settings > Users) and for pre-auth existence checks
+  // (sign-up "already registered?", forgot-password). It is NOT used to
+  // resolve the signed-in user's own session — that comes from a direct,
+  // UID-keyed doc listener below, which avoids the load-order race this
+  // array previously caused.
   useEffect(() => {
     const usersCol = collection(db, "users");
     const unsub = onSnapshot(
@@ -515,84 +523,85 @@ export default function App() {
       (snapshot) => {
         const list: PortalUser[] = [];
         snapshot.forEach((docSnap) => {
-          list.push(docSnap.data() as PortalUser);
+          list.push({ ...(docSnap.data() as PortalUser), uid: docSnap.id });
         });
         setUsers(list);
-
-        // Auto-seed Users if collection is empty
-        if (list.length === 0 && !localStorage.getItem("municipal_assembly_seeded_users")) {
-          console.log("Seeding default portal users to Firestore...");
-          DEFAULT_SEED_USERS.forEach(async (u) => {
-            const docId = u.email.replace(/\./g, "_");
-            try {
-              await setDoc(doc(db, "users", docId), u);
-            } catch (err) {
-              handleFirestoreError(err, OperationType.CREATE, `users/${docId}`);
-            }
-          });
-          localStorage.setItem("municipal_assembly_seeded_users", "true");
-        }
       },
       (error) => {
         console.warn("Firestore users snapshot error:", error);
-        setUsers((prev) => (prev.length > 0 ? prev : DEFAULT_SEED_USERS));
       }
     );
 
     return () => unsub();
   }, []);
 
-  // Resolve currentUser when userEmail or users collection changes
+  // Resolve currentUser directly from my own UID-keyed profile document.
+  // This is the ONLY source of truth for "who am I" — no array search, no
+  // load-order dependency on the broader `users` collection above.
   useEffect(() => {
-    if (!userEmail) {
+    if (!authUid) {
       setCurrentUser(null);
       return;
     }
-    const cleanEmail = userEmail.trim().toLowerCase();
-    const foundUser = users.find(u => u.email.toLowerCase() === cleanEmail);
-    
-    if (foundUser) {
-      // If user exists and is pending review or rejected, block their session
-      if (foundUser.status === "PENDING") {
-        setUserEmail(null);
-        localStorage.removeItem("credential_user_email");
-        signOut(auth).catch(() => {});
-        setAuthError(`Access Denied: Your staff registration for ${cleanEmail} is pending review and activation by a Super Admin.`);
-        setCurrentView("LOGIN");
-        return;
-      } else if (foundUser.status === "REJECTED") {
-        setUserEmail(null);
-        localStorage.removeItem("credential_user_email");
-        signOut(auth).catch(() => {});
-        setAuthError(`Access Denied: Your registration request for ${cleanEmail} has been rejected.`);
-        setCurrentView("LOGIN");
-        return;
+
+    const myRef = doc(db, "users", authUid);
+    const unsub = onSnapshot(
+      myRef,
+      async (snap) => {
+        if (!snap.exists()) {
+          // First time this Firebase Auth account has been seen: self-provision
+          // a PENDING profile (lowest privilege role). A Super Admin must then
+          // review and activate it, exactly like a brand-new hire. This also
+          // covers migrating a pre-existing account into the UID-keyed scheme.
+          const authUser = auth.currentUser;
+          const email = (authUser?.email || "").trim().toLowerCase();
+          const newProfile: PortalUser = {
+            email,
+            name: authUser?.displayName?.trim() || (email.split("@")[0] || "New Staff"),
+            role: "REGISTRAR",
+            createdAt: new Date().toISOString(),
+            status: "PENDING",
+          };
+          try {
+            await setDoc(myRef, newProfile);
+          } catch (err) {
+            handleFirestoreError(err, OperationType.CREATE, `users/${authUid}`);
+            setAuthError("Could not create your staff profile. Please contact a Super Admin.");
+            await signOut(auth).catch(() => {});
+            setCurrentView("LOGIN");
+          }
+          // Wait for the next snapshot (the doc we just created) to handle
+          // messaging/sign-out uniformly via the PENDING branch below.
+          return;
+        }
+
+        const profile = { ...(snap.data() as PortalUser), uid: snap.id };
+
+        if (profile.status === "PENDING") {
+          setAuthError(`Access Denied: Your staff registration for ${profile.email} is pending review and activation by a Super Admin.`);
+          setCurrentUser(null);
+          await signOut(auth).catch(() => {});
+          setCurrentView("LOGIN");
+          return;
+        }
+        if (profile.status === "REJECTED") {
+          setAuthError(`Access Denied: Your registration request for ${profile.email} has been rejected.`);
+          setCurrentUser(null);
+          await signOut(auth).catch(() => {});
+          setCurrentView("LOGIN");
+          return;
+        }
+
+        setCurrentUser(profile);
+        setCurrentView((prev) => (prev === "LOGIN" ? (profile.role === "REGISTRAR" ? "REGISTER" : "DASHBOARD") : prev));
+      },
+      (error) => {
+        console.warn("Firestore own-profile snapshot error:", error);
       }
-      setCurrentUser(foundUser);
-      if (foundUser.role === "REGISTRAR") {
-        setCurrentView("REGISTER");
-      }
-    } else {
-      // If the email is the core admin, automatically resolve them
-      if (cleanEmail === "edwinaikins@gmail.com") {
-        const adminUser: PortalUser = {
-          email: cleanEmail,
-          name: "Edwin Aikins (Super Admin)",
-          role: "SUPER_USER",
-          createdAt: new Date().toISOString(),
-          status: "ACTIVE"
-        };
-        setCurrentUser(adminUser);
-      } else {
-        // Unknown logins must register or be added to the database first
-        setUserEmail(null);
-        localStorage.removeItem("credential_user_email");
-        signOut(auth).catch(() => {});
-        setAuthError(`The email account "${cleanEmail}" is not recognized. Please register below.`);
-        setCurrentView("LOGIN");
-      }
-    }
-  }, [userEmail, users]);
+    );
+
+    return () => unsub();
+  }, [authUid]);
 
   // Force REGISTRAR role to ONLY have access to REGISTER view (no dashboard access)
   useEffect(() => {
@@ -601,19 +610,28 @@ export default function App() {
     }
   }, [currentUser, currentView]);
 
-  // Listen to standard Google login state changes
+  // Listen to Firebase Auth session state. This is the single source of
+  // truth for "am I signed in" — it always clears state on sign-out (the
+  // previous version had no else branch, which could leave a stale session
+  // showing after a token expired or another tab signed out).
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         setUserEmail(user.email);
-        if (currentView === "LOGIN") {
-          const found = users.find(u => u.email.toLowerCase() === user.email?.toLowerCase());
-          setCurrentView(found?.role === "REGISTRAR" ? "REGISTER" : "DASHBOARD");
+        setAuthUid(user.uid);
+        if (user.email) {
+          localStorage.setItem("credential_user_email", user.email);
         }
+      } else {
+        setUserEmail(null);
+        setAuthUid(null);
+        setCurrentUser(null);
+        localStorage.removeItem("credential_user_email");
       }
+      setLoading(false);
     });
     return () => unsubscribe();
-  }, [currentView, users]);
+  }, []);
 
   // Real Email/Password Authentication Handlers
   const handleEmailSignIn = async (e: React.FormEvent) => {
@@ -629,14 +647,12 @@ export default function App() {
     const emailClean = authEmail.trim().toLowerCase();
     
     try {
-      // 1. Attempt standard Firebase Auth sign-in
+      // Attempt standard Firebase Auth sign-in. Session state, profile
+      // resolution, and routing are all handled by the onAuthStateChanged /
+      // own-profile listeners above — no manual lookup needed here.
       await signInWithEmailAndPassword(auth, emailClean, authPassword);
       setAuthPassword("");
       setAuthSuccess("Signed in successfully via secure Firebase identity node!");
-      const matched = users.find(u => u.email.toLowerCase() === emailClean);
-      localStorage.setItem("credential_user_email", emailClean);
-      setUserEmail(emailClean);
-      setCurrentView(matched?.role === "REGISTRAR" ? "REGISTER" : "DASHBOARD");
     } catch (err: any) {
       console.warn("Firebase Auth sign-in failed:", err);
       let errMsg = "Invalid email or incorrect password.";
@@ -668,8 +684,7 @@ export default function App() {
     setAuthSuccess(null);
     
     const emailClean = authEmail.trim().toLowerCase();
-    const docId = emailClean.replace(/\./g, "_");
-    
+
     // Check if user already exists in Firestore list
     const userExists = users.some(u => u.email.toLowerCase() === emailClean);
     if (userExists) {
@@ -690,10 +705,15 @@ export default function App() {
       // 1. Create the real Firebase Auth account. If this fails, stop here —
       // there is no fallback path, so the Firestore profile below must not
       // be written unless the real account actually exists.
-      await createUserWithEmailAndPassword(auth, emailClean, authPassword);
+      const cred = await createUserWithEmailAndPassword(auth, emailClean, authPassword);
 
-      // 2. Write the staff profile to Firestore (no password stored here).
-      await setDoc(doc(db, "users", docId), newUserProfile);
+      // 2. Write the staff profile to Firestore, keyed by the new account's
+      // own UID (required by firestore.rules — no password stored here).
+      await setDoc(doc(db, "users", cred.user.uid), newUserProfile);
+
+      // 3. Sign back out immediately: the account is PENDING, not approved
+      // yet, and we don't want a half-authenticated flash of app UI.
+      await signOut(auth).catch(() => {});
 
       setAuthPassword("");
       setAuthSuccess("Staff account successfully registered! Your registration is pending review. A Super Admin must review, assign your municipal role, and activate your account before you can log in.");
@@ -762,9 +782,10 @@ export default function App() {
     try {
       setAuthLoading(true);
       setAuthError(null);
-      const result = await signInWithPopup(auth, provider);
-      setUserEmail(result.user.email);
-      setCurrentView("DASHBOARD");
+      // Session state, profile resolution (including self-provisioning a
+      // PENDING profile on first sign-in), and routing are all handled by
+      // the onAuthStateChanged / own-profile listeners above.
+      await signInWithPopup(auth, provider);
     } catch (err: any) {
       console.error("Google sign-in error:", err);
       let errMsg = "Google Sign-In popup was blocked or dismissed. Please allow popups for this site, or sign in using your email and password.";
@@ -785,6 +806,8 @@ export default function App() {
     }
     localStorage.removeItem("credential_user_email");
     setUserEmail(null);
+    setAuthUid(null);
+    setCurrentUser(null);
     setAuthEmail("");
     setAuthPassword("");
     setAuthName("");

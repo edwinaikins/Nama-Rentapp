@@ -2,10 +2,13 @@ import express from "express";
 import path from "path";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
-import { sendWigalV3Sms } from "./src/services/wigalSmsUtility";
+import { rateLimit } from "express-rate-limit";
+import { initializeApp as initializeAdminApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+import { sendWigalV3Sms, normalizeGhanaPhoneNumber } from "./src/services/wigalSmsUtility";
 
-// Load environment variables
-dotenv.config();
+// Load environment variables (quiet: dotenv's own console self-promotion is noise in prod logs)
+dotenv.config({ quiet: true });
 
 const app = express();
 const PORT = 3000;
@@ -13,6 +16,44 @@ const PORT = 3000;
 // Enable large JSON payloads for Base64 image transfers
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
+
+// Firebase Admin SDK, initialized for ID-token verification only. Verifying
+// a token just checks its signature against Google's public certs for this
+// project, so no service-account private key/secret is required — only the
+// project ID (which is already public in the client-side Firebase config).
+const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "other-496818";
+const adminApp = initializeAdminApp({ projectId: FIREBASE_PROJECT_ID });
+
+// Require a valid, current Firebase Auth ID token on protected endpoints.
+// This does NOT check Firestore role/status (that would mean an extra
+// round trip on every request) — it only proves the caller is a signed-in
+// Firebase user, which is enough to close the "open, unauthenticated relay"
+// gap. Firestore's own rules remain the authority on role-based access.
+async function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization || "";
+  const match = /^Bearer (.+)$/.exec(authHeader);
+  if (!match) {
+    return res.status(401).json({ success: false, error: "Missing or malformed Authorization header." });
+  }
+  try {
+    const decoded = await getAuth(adminApp).verifyIdToken(match[1]);
+    (req as any).uid = decoded.uid;
+    next();
+  } catch (err) {
+    console.warn("[Auth] ID token verification failed:", err);
+    return res.status(401).json({ success: false, error: "Invalid or expired session token." });
+  }
+}
+
+// Rate limit: caps volume on the SMS relay regardless of which authenticated
+// account is calling it, since SMS sends cost real money via Wigal.
+const smsRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: "Too many SMS requests. Please wait a moment and try again." },
+});
 
 // API Routes
 
@@ -121,11 +162,29 @@ app.post("/api/process-workflow", async (req, res) => {
 });
 
 // Resilient SMS Notification Proxy Endpoint for Wigal (frog.wigal.com.gh)
-app.post("/api/send-sms", async (req, res) => {
+// Locked down: requires a signed-in staff session and is rate-limited,
+// since an open relay here would let anyone send billable SMS traffic.
+app.post("/api/send-sms", requireAuth, smsRateLimiter, async (req, res) => {
   try {
     const { to, message } = req.body;
-    if (!to || !message) {
+    if (!to || typeof to !== "string" || !message || typeof message !== "string") {
       return res.status(400).json({ success: false, error: "Missing recipient (to) or message content" });
+    }
+
+    const trimmedMessage = message.trim();
+    if (trimmedMessage.length === 0) {
+      return res.status(400).json({ success: false, error: "Message content cannot be empty." });
+    }
+    if (trimmedMessage.length > 918) {
+      // 918 chars = 6 concatenated GSM-7 SMS segments, a generous ceiling
+      // for any templated notification this app sends.
+      return res.status(400).json({ success: false, error: "Message content is too long (max 918 characters)." });
+    }
+
+    // A valid normalized Ghana number is always "233" + 9 digits (12 digits total).
+    const normalizedTo = normalizeGhanaPhoneNumber(to);
+    if (!/^233\d{9}$/.test(normalizedTo)) {
+      return res.status(400).json({ success: false, error: "Recipient phone number is not a valid Ghanaian number." });
     }
 
     const username = process.env.WIGAL_USERNAME || process.env.WIGAL_CLIENT_ID || "edwinaikins@gmail.com";
@@ -134,7 +193,7 @@ app.post("/api/send-sms", async (req, res) => {
 
     console.log(`[Wigal SMS v3] Sending message via username: ${username}, senderId: ${senderId} with msgId: ${msgId}`);
 
-    const result = await sendWigalV3Sms(to, message, msgId, senderId);
+    const result = await sendWigalV3Sms(normalizedTo, trimmedMessage, msgId, senderId);
 
     console.log(`[Wigal SMS v3] Gateway response status: ${result.statusCode}`, result.data);
 
