@@ -574,10 +574,10 @@ export default function App() {
       }
     } else {
       // If the email is the core admin, automatically resolve them
-      if (cleanEmail === "edwin@zamsonia.com") {
+      if (cleanEmail === "edwinaikins@gmail.com") {
         const adminUser: PortalUser = {
           email: cleanEmail,
-          name: "Edwin Zamsonia (MCE Admin)",
+          name: "Edwin Aikins (Super Admin)",
           role: "SUPER_USER",
           createdAt: new Date().toISOString(),
           status: "ACTIVE"
@@ -949,7 +949,7 @@ export default function App() {
                         type="email"
                         value={authEmail}
                         onChange={(e) => setAuthEmail(e.target.value)}
-                        placeholder="e.g. edwin@zamsonia.com"
+                        placeholder="e.g. name@nsawam.gov.gh"
                         required
                         className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-500 font-medium bg-slate-50 transition-all focus:bg-white"
                       />
@@ -1033,7 +1033,7 @@ export default function App() {
                         type="email"
                         value={authEmail}
                         onChange={(e) => setAuthEmail(e.target.value)}
-                        placeholder="e.g. edwin@zamsonia.com"
+                        placeholder="e.g. name@nsawam.gov.gh"
                         required
                         className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-500 font-medium bg-slate-50 transition-all focus:bg-white"
                       />
@@ -1095,7 +1095,7 @@ export default function App() {
                         type="email"
                         value={authEmail}
                         onChange={(e) => setAuthEmail(e.target.value)}
-                        placeholder="e.g. edwin@zamsonia.com"
+                        placeholder="e.g. name@nsawam.gov.gh"
                         required
                         className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-500 font-medium bg-slate-50 transition-all focus:bg-white"
                       />
