@@ -5,7 +5,6 @@ export const DEFAULT_SEED_USERS: PortalUser[] = [
     email: "edwin@zamsonia.com",
     name: "Edwin Zamsonia (MCE Admin)",
     role: "SUPER_USER",
-    password: "StaffPass123",
     createdAt: new Date().toISOString(),
     status: "ACTIVE"
   },
@@ -13,7 +12,6 @@ export const DEFAULT_SEED_USERS: PortalUser[] = [
     email: "registrar@nsawam.gov.gh",
     name: "Amma Osei (Registrar Clerk)",
     role: "REGISTRAR",
-    password: "StaffPass123",
     createdAt: new Date().toISOString(),
     status: "ACTIVE"
   },
@@ -21,7 +19,6 @@ export const DEFAULT_SEED_USERS: PortalUser[] = [
     email: "leasing@nsawam.gov.gh",
     name: "Kofi Mensah (Leasing Allocator)",
     role: "LEASING_OFFICER",
-    password: "StaffPass123",
     createdAt: new Date().toISOString(),
     status: "ACTIVE"
   },
@@ -29,7 +26,6 @@ export const DEFAULT_SEED_USERS: PortalUser[] = [
     email: "finance@nsawam.gov.gh",
     name: "Yaw Boateng (Treasury Cashier)",
     role: "FINANCIAL_OFFICER",
-    password: "StaffPass123",
     createdAt: new Date().toISOString(),
     status: "ACTIVE"
   }

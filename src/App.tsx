@@ -638,33 +638,16 @@ export default function App() {
       setUserEmail(emailClean);
       setCurrentView(matched?.role === "REGISTRAR" ? "REGISTER" : "DASHBOARD");
     } catch (err: any) {
-      console.warn("Standard Firebase Auth sign-in failed/blocked, falling back to Firestore ledger:", err);
-      
-      // 2. Dual-mode / Graceful fallback to Firestore credential matching
-      const matchedUser = users.find(u => u.email.toLowerCase() === emailClean);
-      
-      if (matchedUser) {
-        // If password is set in Firestore, verify it. Otherwise fallback to standard seed pass
-        const correctPassword = matchedUser.password || "StaffPass123";
-        
-        if (authPassword === correctPassword) {
-          setAuthPassword("");
-          setAuthSuccess("Signed in successfully via local credential database!");
-          localStorage.setItem("credential_user_email", emailClean);
-          setUserEmail(emailClean);
-          setCurrentView(matchedUser.role === "REGISTRAR" ? "REGISTER" : "DASHBOARD");
-        } else {
-          setAuthError("Incorrect password. Please verify your security key.");
-        }
-      } else {
-        let errMsg = "No registered staff account found with this email.";
-        if (err.code === "auth/invalid-credential" || err.code === "auth/wrong-password") {
-          errMsg = "Invalid email or incorrect password.";
-        } else if (err.code === "auth/invalid-email") {
-          errMsg = "The email address is not formatted correctly.";
-        }
-        setAuthError(errMsg);
+      console.warn("Firebase Auth sign-in failed:", err);
+      let errMsg = "Invalid email or incorrect password.";
+      if (err.code === "auth/invalid-email") {
+        errMsg = "The email address is not formatted correctly.";
+      } else if (err.code === "auth/user-not-found") {
+        errMsg = "No registered staff account found with this email.";
+      } else if (err.code === "auth/too-many-requests") {
+        errMsg = "Too many attempts. Please wait a moment and try again.";
       }
+      setAuthError(errMsg);
     } finally {
       setAuthLoading(false);
     }
@@ -699,28 +682,35 @@ export default function App() {
       email: emailClean,
       name: authName.trim(),
       role: authRole,
-      password: authPassword,
       createdAt: new Date().toISOString(),
       status: "PENDING"
     };
 
     try {
-      // 1. Attempt real Firebase Auth registration
-      try {
-        await createUserWithEmailAndPassword(auth, emailClean, authPassword);
-      } catch (authErr: any) {
-        console.warn("Firebase Auth account creation bypassed (using database ledger):", authErr);
-      }
-      
-      // 2. Write to Firestore database
+      // 1. Create the real Firebase Auth account. If this fails, stop here —
+      // there is no fallback path, so the Firestore profile below must not
+      // be written unless the real account actually exists.
+      await createUserWithEmailAndPassword(auth, emailClean, authPassword);
+
+      // 2. Write the staff profile to Firestore (no password stored here).
       await setDoc(doc(db, "users", docId), newUserProfile);
-      
+
       setAuthPassword("");
       setAuthSuccess("Staff account successfully registered! Your registration is pending review. A Super Admin must review, assign your municipal role, and activate your account before you can log in.");
       setAuthMode("SIGN_IN");
     } catch (err: any) {
       console.error("Registration error:", err);
-      setAuthError("Failed to register staff account: " + (err.message || err));
+      let errMsg = "Failed to register staff account.";
+      if (err.code === "auth/email-already-in-use") {
+        errMsg = "An account with this email address already exists.";
+      } else if (err.code === "auth/invalid-email") {
+        errMsg = "The email address is not formatted correctly.";
+      } else if (err.code === "auth/weak-password") {
+        errMsg = "Password is too weak. Please choose a stronger password.";
+      } else if (err.message) {
+        errMsg = err.message;
+      }
+      setAuthError(errMsg);
     } finally {
       setAuthLoading(false);
     }
@@ -740,42 +730,27 @@ export default function App() {
     
     // Check if user exists in Firestore
     const matchedUser = users.find(u => u.email.toLowerCase() === emailClean);
-    
+
     if (!matchedUser) {
       setAuthError("No registered staff account found with this email address.");
       setAuthLoading(false);
       return;
     }
 
-    // Generate a temporary reset password
-    const tempPass = "Reset" + Math.floor(1000 + Math.random() * 9000);
-    
     try {
-      // 1. Attempt real Firebase Auth reset
-      let resetSentReal = false;
-      try {
-        await sendPasswordResetEmail(auth, emailClean);
-        resetSentReal = true;
-      } catch (authErr: any) {
-        console.warn("Firebase Auth reset email bypassed (using simulated email delivery):", authErr);
-      }
-
-      // 2. Update the user password in Firestore so they can actually log in with the new password
-      const docId = emailClean.replace(/\./g, "_");
-      await setDoc(doc(db, "users", docId), {
-        ...matchedUser,
-        password: tempPass
-      });
-
-      // 3. Display success with simulated email delivery box
-      setAuthSuccess(
-        resetSentReal
-          ? "A password reset link has been dispatched to your email address! Please check your inbox."
-          : `Password Reset Initiated! Since standard SMTP/auth resets are restricted in the local sandbox, we have simulated the email dispatch. Your password has been updated to: ${tempPass} (You can use this to sign in immediately).`
-      );
+      await sendPasswordResetEmail(auth, emailClean);
+      setAuthSuccess("A password reset link has been dispatched to your email address! Please check your inbox.");
     } catch (err: any) {
       console.error("Password reset error:", err);
-      setAuthError("Failed to initiate password reset: " + (err.message || err));
+      let errMsg = "Failed to send password reset email.";
+      if (err.code === "auth/user-not-found") {
+        errMsg = "No Firebase account found for this email. Contact a Super Admin to have your account set up.";
+      } else if (err.code === "auth/invalid-email") {
+        errMsg = "The email address is not formatted correctly.";
+      } else if (err.message) {
+        errMsg = err.message;
+      }
+      setAuthError(errMsg);
     } finally {
       setAuthLoading(false);
     }

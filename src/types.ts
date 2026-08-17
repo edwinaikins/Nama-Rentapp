@@ -112,7 +112,6 @@ export interface PortalUser {
   name: string;
   role: UserRole;
   createdAt: string;
-  password?: string;
   status?: "PENDING" | "ACTIVE" | "REJECTED";
 }
 
