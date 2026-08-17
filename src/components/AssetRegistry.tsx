@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Asset, Category, AssetStatus, Application, PortalUser, SmsTemplatesSetting, RentRatesSetting } from "../types";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { sendSMSAndLog, formatAllocationSms } from "../services/smsService";
-import { doc, setDoc, deleteDoc, updateDoc, writeBatch } from "firebase/firestore";
+import { doc, setDoc, deleteDoc, updateDoc, writeBatch, runTransaction } from "firebase/firestore";
 import { DEFAULT_SMS_TEMPLATES } from "../data";
 import { getCentralRentRate } from "../utils/rentUtils";
 import { 
@@ -412,32 +412,44 @@ export default function AssetRegistry({ assets, categories, applications, onClos
       return;
     }
 
-    try {
-      // 1. Reset asset doc in Firestore
-      const safeDocId = assetToRelease.id.replace(/\//g, "-");
-      await updateDoc(doc(db, "assets", safeDocId), {
-        status: "VACANT",
-        assignedApplicationId: null,
-        assignedOccupantName: null,
-        updatedAt: new Date().toISOString()
-      });
+    const safeDocId = assetToRelease.id.replace(/\//g, "-");
+    const assetRef = doc(db, "assets", safeDocId);
+    const matchingApp = assetToRelease.assignedApplicationId
+      ? applications.find(a => a.id === assetToRelease.assignedApplicationId)
+      : undefined;
+    const appDocRef = matchingApp ? doc(db, "applications", matchingApp.id) : null;
 
-      // 2. Clear assigned asset on linked application doc if applicable
-      if (assetToRelease.assignedApplicationId) {
-        const matchingApp = applications.find(a => a.id === assetToRelease.assignedApplicationId);
-        if (matchingApp) {
-          const appDocRef = doc(db, "applications", matchingApp.id);
-          const remainingAssigned = (matchingApp.assignedAssets || []).filter(id => id !== assetToRelease.id);
+    try {
+      // Release the asset and clear it from the linked application
+      // atomically, re-reading the application's live assignedAssets list
+      // inside the transaction rather than trusting a possibly-stale prop.
+      await runTransaction(db, async (tx) => {
+        // All reads must happen before any writes in a Firestore transaction.
+        const appSnap = appDocRef ? await tx.get(appDocRef) : null;
+
+        tx.update(assetRef, {
+          status: "VACANT",
+          assignedApplicationId: null,
+          assignedOccupantName: null,
+          updatedAt: new Date().toISOString()
+        });
+
+        if (appDocRef && matchingApp && appSnap) {
+          const appData = (appSnap.data() as Application | undefined) || matchingApp;
+          const currentAssigned = appData.assignedAssets && appData.assignedAssets.length > 0
+            ? appData.assignedAssets
+            : [assetToRelease.id];
+          const remainingAssigned = currentAssigned.filter(id => id !== assetToRelease.id);
           const isNowEmpty = remainingAssigned.length === 0;
 
-          await updateDoc(appDocRef, {
-            assetCode: isNowEmpty ? "" : (matchingApp.assetCode === assetToRelease.id ? "" : matchingApp.assetCode),
+          tx.update(appDocRef, {
+            assetCode: isNowEmpty ? "" : (appData.assetCode === assetToRelease.id ? "" : appData.assetCode),
             assignedAssets: remainingAssigned,
-            status: isNowEmpty && (matchingApp.status === "RESERVED" || matchingApp.status === "AWAITING_PAYMENT") ? "PENDING_ALLOCATION" : matchingApp.status,
+            status: isNowEmpty && (appData.status === "RESERVED" || appData.status === "AWAITING_PAYMENT") ? "PENDING_ALLOCATION" : appData.status,
             updatedAt: new Date().toISOString()
           });
         }
-      }
+      });
 
       onUpdate();
     } catch (err) {
@@ -462,28 +474,43 @@ export default function AssetRegistry({ assets, categories, applications, onClos
       return;
     }
 
+    const appDocRef = doc(db, "applications", matchingApp.id);
+    const assetDocRef = doc(db, "assets", allocatingAsset.id.replace(/\//g, "-"));
+    const updatedAssetCode = matchingApp.assetCode || allocatingAsset.id;
+
     try {
-      // 1. Update application status & assign asset code
-      const appDocRef = doc(db, "applications", matchingApp.id);
-      const existingAssets = matchingApp.assignedAssets || [];
-      const updatedAssignedAssets = Array.from(new Set([...existingAssets, allocatingAsset.id]));
-      const updatedStatus = matchingApp.status === "PENDING_ALLOCATION" ? "RESERVED" : matchingApp.status;
-      const updatedAssetCode = matchingApp.assetCode || allocatingAsset.id;
+      // A transaction re-checks the asset is still VACANT and updates both
+      // documents atomically — closes the same double-allocation race as
+      // ApplicationDetails.handleAllocate.
+      await runTransaction(db, async (tx) => {
+        const assetSnap = await tx.get(assetDocRef);
+        if (!assetSnap.exists()) {
+          throw new Error(`Asset "${allocatingAsset.id}" was not found in the registry.`);
+        }
+        const assetData = assetSnap.data() as Asset;
+        if (assetData.status !== "VACANT") {
+          throw new Error(`Asset "${allocatingAsset.id}" is no longer vacant (currently ${assetData.status}). It may have just been allocated to someone else — please refresh and try again.`);
+        }
 
-      await updateDoc(appDocRef, {
-        status: updatedStatus,
-        assetCode: updatedAssetCode,
-        assignedAssets: updatedAssignedAssets,
-        updatedAt: new Date().toISOString()
-      });
+        const appSnap = await tx.get(appDocRef);
+        const appData = (appSnap.data() as Application | undefined) || matchingApp;
+        const existingAssets = appData.assignedAssets || [];
+        const updatedAssignedAssets = Array.from(new Set([...existingAssets, allocatingAsset.id]));
+        const updatedStatus = appData.status === "PENDING_ALLOCATION" ? "RESERVED" : appData.status;
 
-      // 2. Update asset status & assign application/occupant info
-      const assetDocRef = doc(db, "assets", allocatingAsset.id);
-      await updateDoc(assetDocRef, {
-        status: "RESERVED",
-        assignedApplicationId: matchingApp.id,
-        assignedOccupantName: `${matchingApp.firstName} ${matchingApp.surname}`,
-        updatedAt: new Date().toISOString()
+        tx.update(appDocRef, {
+          status: updatedStatus,
+          assetCode: updatedAssetCode,
+          assignedAssets: updatedAssignedAssets,
+          updatedAt: new Date().toISOString()
+        });
+
+        tx.update(assetDocRef, {
+          status: "RESERVED",
+          assignedApplicationId: matchingApp.id,
+          assignedOccupantName: `${matchingApp.firstName} ${matchingApp.surname}`,
+          updatedAt: new Date().toISOString()
+        });
       });
 
       // Asynchronously trigger Wigal SMS notification to the client upon space allocation
@@ -505,8 +532,12 @@ export default function AssetRegistry({ assets, categories, applications, onClos
       setAllocatingAsset(null);
       setSelectedAppId("");
       onUpdate();
-    } catch (err) {
+    } catch (err: any) {
       setIsAllocating(false);
+      if (err instanceof Error && /no longer vacant|was not found in the registry/.test(err.message)) {
+        setAllocationError(err.message);
+        return;
+      }
       setAllocationError("Failed to update Firestore records.");
       handleFirestoreError(err, OperationType.UPDATE, `assets/${allocatingAsset.id}`);
     }

@@ -8,6 +8,14 @@ function escapeCSVValue(val: any): string {
   } else {
     str = String(val);
   }
+  // CSV formula injection guard: a value starting with =, +, -, @, or a
+  // leading tab/CR can execute as a formula (or trigger a DDE payload) when
+  // the exported file is opened in Excel/Sheets. Prefixing with a single
+  // quote forces spreadsheet apps to treat it as plain text while leaving
+  // the visible value effectively unchanged.
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = "'" + str;
+  }
   // If value contains a comma, newline, or double quote, escape it
   if (str.includes(",") || str.includes("\n") || str.includes("\r") || str.includes('"')) {
     str = '"' + str.replace(/"/g, '""') + '"';

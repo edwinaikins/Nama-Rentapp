@@ -150,8 +150,13 @@ export default function ClientAllocationLetterTab({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 3 * 1024 * 1024) {
-      setScannedLetterUploadError("File size exceeds 3MB limit. Please compress your scanned image or PDF screenshot.");
+    // Firestore caps a whole document at ~1MB, and this base64-encoded
+    // image lives inline on the application document. Base64 inflates raw
+    // size by ~33%, so the old 3MB limit would silently fail to save
+    // around 700KB in — this cap keeps the encoded upload comfortably
+    // under that ceiling.
+    if (file.size > 650 * 1024) {
+      setScannedLetterUploadError("File size exceeds 650KB. This document is stored inline on the application record, which has a hard ~1MB Firestore limit — please compress your scanned image or PDF screenshot and try again.");
       return;
     }
 

@@ -6,7 +6,7 @@ import {
   Trash2, FileText, Smartphone, ArrowRight, Printer, AlertCircle,
   Upload, Paperclip, Eye, ShieldAlert, Lock
 } from "lucide-react";
-import { doc, updateDoc, deleteDoc } from "firebase/firestore";
+import { doc, updateDoc, deleteDoc, runTransaction, arrayUnion } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { sendSMSAndLog, formatAllocationSms, formatPaymentSms } from "../services/smsService";
 import { DEFAULT_SMS_TEMPLATES, DEFAULT_ALLOCATION_LETTER_TEMPLATE } from "../data";
@@ -194,30 +194,60 @@ export default function ApplicationDetails({
     const safeDocId = cleanCode.replace(/\//g, "-");
 
     setIsUpdating(true);
-    try {
-      // 1. Update the occupant application doc
-      const appDocRef = doc(db, "applications", application.id);
-      await updateDoc(appDocRef, {
-        status: "RESERVED",
-        assetCode: cleanCode,
-        updatedAt: new Date().toISOString()
-      });
+    setAllocationError("");
 
-      // 2. Synchronously reserve the physical asset if registered
-      const matchingAsset = assets.find(a => 
-        a.id.toUpperCase() === cleanCode || 
-        a.id.toUpperCase() === safeDocId || 
-        (a.assetCode && a.assetCode.toUpperCase() === cleanCode)
-      );
-      if (matchingAsset) {
-        const targetDocId = matchingAsset.id.replace(/\//g, "-");
-        await updateDoc(doc(db, "assets", targetDocId), {
+    const matchingAsset = assets.find(a =>
+      a.id.toUpperCase() === cleanCode ||
+      a.id.toUpperCase() === safeDocId ||
+      (a.assetCode && a.assetCode.toUpperCase() === cleanCode)
+    );
+
+    try {
+      const appDocRef = doc(db, "applications", application.id);
+
+      // A Firestore transaction guarantees the asset is re-checked and
+      // reserved atomically: if two staff try to allocate the same asset
+      // around the same time, the second transaction re-reads the asset,
+      // sees it's no longer VACANT, and aborts cleanly instead of both
+      // succeeding and double-booking the same physical asset.
+      await runTransaction(db, async (tx) => {
+        let assetRef = null;
+        if (matchingAsset) {
+          const targetDocId = matchingAsset.id.replace(/\//g, "-");
+          assetRef = doc(db, "assets", targetDocId);
+          const assetSnap = await tx.get(assetRef);
+          if (!assetSnap.exists()) {
+            throw new Error(`Asset "${cleanCode}" was not found in the registry.`);
+          }
+          const assetData = assetSnap.data() as Asset;
+          if (assetData.status !== "VACANT") {
+            throw new Error(`Asset "${cleanCode}" is no longer vacant (currently ${assetData.status}). It may have just been allocated to someone else — please refresh and try again.`);
+          }
+        }
+
+        const appSnap = await tx.get(appDocRef);
+        const appData = (appSnap.data() as Application | undefined) || application;
+        const existingAssigned = appData.assignedAssets || [];
+        const updatedAssigned = matchingAsset
+          ? Array.from(new Set([...existingAssigned, matchingAsset.id]))
+          : existingAssigned;
+
+        tx.update(appDocRef, {
           status: "RESERVED",
-          assignedApplicationId: application.id,
-          assignedOccupantName: `${application.firstName} ${application.surname}`,
+          assetCode: cleanCode,
+          assignedAssets: updatedAssigned,
           updatedAt: new Date().toISOString()
         });
-      }
+
+        if (assetRef) {
+          tx.update(assetRef, {
+            status: "RESERVED",
+            assignedApplicationId: application.id,
+            assignedOccupantName: `${application.firstName} ${application.surname}`,
+            updatedAt: new Date().toISOString()
+          });
+        }
+      });
 
       // Asynchronously trigger Wigal SMS notification to the client upon space allocation (non-blocking)
       try {
@@ -235,8 +265,12 @@ export default function ApplicationDetails({
 
       setIsUpdating(false);
       onUpdate();
-    } catch (err) {
+    } catch (err: any) {
       setIsUpdating(false);
+      if (err instanceof Error && /no longer vacant|was not found in the registry/.test(err.message)) {
+        setAllocationError(err.message);
+        return;
+      }
       handleFirestoreError(err, OperationType.UPDATE, `applications/${application.id}`);
     }
   };
@@ -279,8 +313,13 @@ export default function ApplicationDetails({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 3 * 1024 * 1024) {
-      setScannedFileUploadError("File size exceeds 3MB limit. Please compress your scanned image or PDF screenshot.");
+    // Firestore caps a whole document at ~1MB, and this base64-encoded
+    // image lives inline on the application document alongside its other
+    // fields. Base64 inflates raw size by ~33%, so a 3MB file (the old
+    // limit) would silently fail to save around 700KB in — this cap keeps
+    // the encoded upload comfortably under that ceiling.
+    if (file.size > 650 * 1024) {
+      setScannedFileUploadError("File size exceeds 650KB. This document is stored inline on the application record, which has a hard ~1MB Firestore limit — please compress your scanned image or PDF screenshot and try again.");
       return;
     }
 
@@ -356,14 +395,16 @@ export default function ApplicationDetails({
       notes: installmentNotes.trim()
     };
 
-    const currentPayments = application.payments || [];
-    const updatedPayments = [...currentPayments, newPayment];
-
     // Transition to OCCUPIED on logging first payment
     const nextStatus = "OCCUPIED";
 
-    const payload: Partial<Application> = {
-      payments: updatedPayments,
+    // Append via arrayUnion rather than a local read-modify-write: if two
+    // staff log a payment for the same tenant close together, a plain
+    // array overwrite can silently drop one of them. arrayUnion is an
+    // atomic server-side field transform, so both payments always survive
+    // regardless of write ordering.
+    const payload = {
+      payments: arrayUnion(newPayment),
       paymentMode: installmentMode,
       paymentRef: installmentReceiptNo.trim().toUpperCase(),
       paymentLoggedAt: new Date().toISOString(),
@@ -507,30 +548,46 @@ export default function ApplicationDetails({
 
     setIsUpdating(true);
     try {
-      // 1. Release asset doc(s) in Firestore
-      const targetAssets = assetToUnlink 
-        ? [assetToUnlink] 
+      const targetAssets = assetToUnlink
+        ? [assetToUnlink]
         : (assignedAssetsList.length > 0 ? assignedAssetsList : assets.filter(a => (a.assetCode || a.id).toUpperCase() === (codeToUnlink || "").toUpperCase()));
 
-      for (const ast of targetAssets) {
-        const safeDocId = ast.id.replace(/\//g, "-");
-        await updateDoc(doc(db, "assets", safeDocId), {
-          status: "VACANT",
-          assignedApplicationId: null,
-          assignedOccupantName: null,
+      const appDocRef = doc(db, "applications", application.id);
+      const targetAssetRefs = targetAssets.map(ast => doc(db, "assets", ast.id.replace(/\//g, "-")));
+
+      // Release the asset(s) and update the application atomically, so a
+      // dropped connection between the two can't leave them disagreeing.
+      // "Remaining" is computed as (everything currently assigned) minus
+      // (what's being unlinked right now) — NOT filtered against a
+      // possibly-undefined single asset id, which previously meant
+      // "unlink all" left the full list untouched and the application
+      // stuck showing a stale allocation.
+      await runTransaction(db, async (tx) => {
+        const appSnap = await tx.get(appDocRef);
+        const appData = (appSnap.data() as Application | undefined) || application;
+        const targetIds = new Set(targetAssets.map(a => a.id));
+        const currentAssigned = appData.assignedAssets && appData.assignedAssets.length > 0
+          ? appData.assignedAssets
+          : assignedAssetsList.map(a => a.id); // fallback for docs never populated by an older allocation flow
+        const remainingIds = currentAssigned.filter(id => !targetIds.has(id));
+        const isNowEmpty = remainingIds.length === 0;
+        const remainingFirstAsset = assets.find(a => a.id === remainingIds[0]);
+
+        tx.update(appDocRef, {
+          assetCode: isNowEmpty ? "" : (remainingFirstAsset?.assetCode || remainingIds[0]),
+          assignedAssets: remainingIds,
+          status: isNowEmpty && (application.status === "RESERVED" || application.status === "AWAITING_PAYMENT") ? "PENDING_ALLOCATION" : application.status,
           updatedAt: new Date().toISOString()
         });
-      }
 
-      // 2. Update application doc in Firestore
-      const remainingAssets = assignedAssetsList.filter(a => a.id !== (assetToUnlink?.id || ""));
-      const isNowEmpty = remainingAssets.length === 0;
-
-      const appDocRef = doc(db, "applications", application.id);
-      await updateDoc(appDocRef, {
-        assetCode: isNowEmpty ? "" : (remainingAssets[0].assetCode || remainingAssets[0].id),
-        status: isNowEmpty && (application.status === "RESERVED" || application.status === "AWAITING_PAYMENT") ? "PENDING_ALLOCATION" : application.status,
-        updatedAt: new Date().toISOString()
+        for (const ref of targetAssetRefs) {
+          tx.update(ref, {
+            status: "VACANT",
+            assignedApplicationId: null,
+            assignedOccupantName: null,
+            updatedAt: new Date().toISOString()
+          });
+        }
       });
 
       setIsUpdating(false);

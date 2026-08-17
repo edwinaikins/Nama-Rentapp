@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { doc, updateDoc, writeBatch, deleteDoc } from "firebase/firestore";
-import { db } from "../firebase";
+import { db, handleFirestoreError, OperationType } from "../firebase";
 import { Application, Category, ApplicationStatus, PortalUser, Asset, SmsLog, RentRatesSetting, RentBillTemplateSetting, GlobalSignatureSetting } from "../types";
 import { getCentralRentRate } from "../utils/rentUtils";
 import MunicipalLogo from "./MunicipalLogo";
@@ -157,6 +157,67 @@ export default function OverviewDashboard({
   const [selectedPrintBillApp, setSelectedPrintBillApp] = useState<Application | null>(null);
   const [printAllBills, setPrintAllBills] = useState(false);
 
+  // Keep the print-bill modal's snapshot in sync with the live applications
+  // list (e.g. once a persisted bill number round-trips back from Firestore).
+  useEffect(() => {
+    if (!selectedPrintBillApp) return;
+    const fresh = applications.find(a => a.id === selectedPrintBillApp.id);
+    if (fresh && fresh !== selectedPrintBillApp) {
+      setSelectedPrintBillApp(fresh);
+    }
+  }, [applications]);
+
+  // Opens the print-bill modal. A bill number, once printed, must stay the
+  // same every time — it's an official financial document reference. If
+  // this application doesn't have one yet, generate and persist it now
+  // (rather than re-randomizing it on every render, which is never saved).
+  const handleOpenPrintBill = async (app: Application) => {
+    if (app.rentBillNo) {
+      setSelectedPrintBillApp(app);
+      return;
+    }
+    const newBillNo = `NB-${app.id.substring(0, 6).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const newBillDate = new Date().toISOString().split("T")[0];
+    const merged = { ...app, rentBillNo: newBillNo, rentBillDate: newBillDate };
+    setSelectedPrintBillApp(merged);
+    try {
+      await updateDoc(doc(db, "applications", app.id), {
+        rentBillNo: newBillNo,
+        rentBillDate: newBillDate,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `applications/${app.id}/rentBillNo`);
+    }
+  };
+
+  // Opens the bulk print modal. Same reasoning as handleOpenPrintBill: every
+  // tenant in the batch needs a stable, persisted bill number rather than
+  // one derived from array index (which drifts between visits as the list
+  // is filtered/sorted differently, and can disagree with the single-print
+  // view for the same tenant).
+  const handleOpenBulkPrintBills = async () => {
+    const missingBillNo = activeTenants.filter(app => !app.rentBillNo);
+    if (missingBillNo.length > 0) {
+      try {
+        const batch = writeBatch(db);
+        const todayIso = new Date().toISOString().split("T")[0];
+        missingBillNo.forEach(app => {
+          const newBillNo = `NB-${app.id.substring(0, 6).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+          batch.update(doc(db, "applications", app.id), {
+            rentBillNo: newBillNo,
+            rentBillDate: app.rentBillDate || todayIso,
+            updatedAt: new Date().toISOString()
+          });
+        });
+        await batch.commit();
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, "applications/bulk-rent-bill-no");
+      }
+    }
+    setPrintAllBills(true);
+  };
+
   // Filter out occupied applications who are eligible for annual rent bill generation
   const activeTenants = applications.filter(app => app.status === "OCCUPIED" || app.status === "AWAITING_PAYMENT");
 
@@ -310,6 +371,15 @@ export default function OverviewDashboard({
   const handleDeleteAppFromDashboard = async (app: Application, e: React.MouseEvent) => {
     e.stopPropagation();
 
+    // Explicit allow-list, not "anyone who isn't a REGISTRAR" — this is a
+    // permanent, irreversible delete, and previously LEASING_OFFICER and
+    // FINANCIAL_OFFICER accounts could reach it too since the only gate on
+    // this whole screen was role !== "REGISTRAR".
+    if (currentUser?.role !== "SUPER_USER") {
+      alert("Only a Super User can permanently delete an application record.");
+      return;
+    }
+
     if (!window.confirm(`Are you sure you want to PERMANENTLY DELETE the record for ${app.firstName} ${app.surname} (${app.id})? This will delete the profile from the database and release any allocated physical store back to VACANT.`)) {
       return;
     }
@@ -457,10 +527,20 @@ export default function OverviewDashboard({
     { name: "Occupied & Active", value: occupiedCount, color: "#10b981" }
   ].filter(d => d.value > 0);
 
+  // "Projected Monthly" is a genuine estimate (occupied/reserved units x
+  // standard rent rate) and is presented as such. "Collected Monthly" must
+  // NOT be another estimate — it's derived from the real payment records
+  // already logged against each application, summed for the current
+  // calendar month only, so it reflects actual cash received.
+  const currentMonthKey = new Date().toISOString().slice(0, 7); // "YYYY-MM"
   const revenueData = analyticsSubTypes.map(subType => {
     const subTypeAssets = analyticsAssets.filter(a => a.subType === subType && (a.status === "OCCUPIED" || a.status === "RESERVED"));
     const totalProjected = subTypeAssets.reduce((sum, a) => sum + (a.baseRent || 150), 0);
-    const collectedRevenue = analyticsAssets.filter(a => a.subType === subType && a.status === "OCCUPIED").reduce((sum, a) => sum + (a.baseRent || 150), 0);
+    const collectedRevenue = analyticsApplications
+      .filter(a => a.subType === subType)
+      .flatMap(a => a.payments || [])
+      .filter(p => (p.paymentDate || "").startsWith(currentMonthKey))
+      .reduce((sum, p) => sum + (Number(p.amountPaid) || 0), 0);
     return {
       name: subType,
       "Projected Monthly": totalProjected,
@@ -1252,14 +1332,16 @@ export default function OverviewDashboard({
                               <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${getStatusStyle(app.status)}`}>
                                 {getStatusLabel(app.status)}
                               </span>
-                              <button
-                                type="button"
-                                onClick={(e) => handleDeleteAppFromDashboard(app, e)}
-                                className="p-1 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                                title="Delete Record"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              {currentUser?.role === "SUPER_USER" && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleDeleteAppFromDashboard(app, e)}
+                                  className="p-1 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Delete Record"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                             </div>
                           </div>
                           
@@ -1874,7 +1956,7 @@ export default function OverviewDashboard({
 
                   <button
                     type="button"
-                    onClick={() => setPrintAllBills(true)}
+                    onClick={() => handleOpenBulkPrintBills()}
                     disabled={activeTenants.filter(app => {
                       const term = billingSearch.toLowerCase();
                       const name = `${app.firstName} ${app.surname}`.toLowerCase();
@@ -1939,7 +2021,7 @@ export default function OverviewDashboard({
 
                           <button
                             type="button"
-                            onClick={() => setSelectedPrintBillApp(app)}
+                            onClick={() => handleOpenPrintBill(app)}
                             className="p-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl transition-all active:scale-90 border border-indigo-100/60 flex items-center justify-center cursor-pointer shrink-0"
                             title="Print Bill Hard Copy"
                           >
@@ -2242,7 +2324,7 @@ export default function OverviewDashboard({
 
                 <div className="text-right shrink-0 flex flex-col justify-between h-20">
                   <div className="border border-slate-200 p-2 rounded bg-slate-50/50 text-[8px] font-mono text-slate-600 space-y-0.5">
-                    <div><strong>BILL NO:</strong> NB-{selectedPrintBillApp.id.substring(0, 6).toUpperCase()}-{Math.floor(Math.random() * 9000 + 1000)}</div>
+                    <div><strong>BILL NO:</strong> {selectedPrintBillApp.rentBillNo || `NB-${selectedPrintBillApp.id.substring(0, 6).toUpperCase()}-PENDING`}</div>
                     <div><strong>DATE:</strong> {new Date().toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' })}</div>
                     <div><strong>DUE DATE:</strong> 30 Days from issue</div>
                   </div>
@@ -2561,7 +2643,7 @@ export default function OverviewDashboard({
 
                       <div className="text-right shrink-0 flex flex-col justify-between h-20">
                         <div className="border border-slate-200 p-2 rounded bg-slate-50/50 text-[8px] font-mono text-slate-600 space-y-0.5">
-                          <div><strong>BILL NO:</strong> NB-{app.id.substring(0, 6).toUpperCase()}-{Math.floor(1000 + (index * 73) % 9000)}</div>
+                          <div><strong>BILL NO:</strong> {app.rentBillNo || `NB-${app.id.substring(0, 6).toUpperCase()}-PENDING`}</div>
                           <div><strong>DATE:</strong> {new Date().toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' })}</div>
                           <div><strong>DUE DATE:</strong> 30 Days from issue</div>
                         </div>
