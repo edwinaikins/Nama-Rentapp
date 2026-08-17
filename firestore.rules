@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow full read and write across all collections for registry management
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

@@ -1,0 +1,330 @@
+{
+  "entities": {
+    "category": {
+      "title": "Category",
+      "description": "Dynamic property track configuration (EAV definition)",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the track/category"
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the category, e.g. Market Stores"
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of the category track"
+        },
+        "subTypes": {
+          "type": "array",
+          "description": "Allowed housing or commercial sub-types"
+        },
+        "attributes": {
+          "type": "array",
+          "description": "Custom attribute definitions for dynamic form fields"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp of creation"
+        }
+      },
+      "required": ["id", "name"]
+    },
+    "application": {
+      "title": "Application",
+      "description": "Commercial space or staff housing registration and allocation record",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique registration ID"
+        },
+        "categoryId": {
+          "type": "string",
+          "description": "Reference to the dynamic category ID"
+        },
+        "subType": {
+          "type": "string",
+          "description": "Selected sub-type of asset"
+        },
+        "firstName": {
+          "type": "string",
+          "description": "First name of the applicant"
+        },
+        "surname": {
+          "type": "string",
+          "description": "Surname of the applicant"
+        },
+        "gender": {
+          "type": "string",
+          "description": "Gender of the applicant"
+        },
+        "contactNumber": {
+          "type": "string",
+          "description": "Applicant's contact phone number"
+        },
+        "address": {
+          "type": "string",
+          "description": "Residential or business address of the applicant"
+        },
+        "ghanaCardNumber": {
+          "type": "string",
+          "description": "Applicant's Ghana Card Number in format GHA-XXXXXXXXX-X"
+        },
+        "photo": {
+          "type": "string",
+          "description": "Base64-encoded passport photo captured live via camera"
+        },
+        "attributes": {
+          "type": "object",
+          "description": "Dynamic dynamic attributes stored as key-value pairs (EAV values)"
+        },
+        "status": {
+          "type": "string",
+          "description": "Current lifecycle status: PENDING_ALLOCATION, RESERVED, AWAITING_PAYMENT, OCCUPIED"
+        },
+        "assetCode": {
+          "type": "string",
+          "description": "Allocated vacant asset code, e.g. NMA-MKT-B12"
+        },
+        "leaseDuration": {
+          "type": "string",
+          "description": "Configured lease duration (e.g. 1 year)"
+        },
+        "baseRent": {
+          "type": "number",
+          "description": "Base rent rate in GHS"
+        },
+        "signedAt": {
+          "type": "string",
+          "description": "ISO timestamp when contract was signed"
+        },
+        "paymentMode": {
+          "type": "string",
+          "description": "Logged payment mode (Mobile Money, Bank Deposit, Salary Deduction)"
+        },
+        "paymentRef": {
+          "type": "string",
+          "description": "Transaction reference or receipt number"
+        },
+        "scannedAllocationLetterUrl": {
+          "type": "string",
+          "description": "Base64 data url of the scanned allocation letter document"
+        },
+        "scannedAllocationLetterUploadedAt": {
+          "type": "string",
+          "description": "ISO timestamp of scanned allocation letter upload"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Server creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Server update timestamp"
+        }
+      },
+      "required": ["id", "categoryId", "subType", "firstName", "surname", "gender", "contactNumber", "address", "ghanaCardNumber", "status"]
+    },
+    "asset": {
+      "title": "Asset",
+      "description": "Physical public asset (e.g. store, bungalow, stall) owned by Nsawam Municipal Assembly",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique asset code, e.g. NMA-MKT-B12"
+        },
+        "name": {
+          "type": "string",
+          "description": "Physical description or address of the asset"
+        },
+        "categoryId": {
+          "type": "string",
+          "description": "Category track configuration ID"
+        },
+        "subType": {
+          "type": "string",
+          "description": "Specific asset sub-type, e.g. Store, Executive Bungalow"
+        },
+        "status": {
+          "type": "string",
+          "description": "Current asset occupancy status: VACANT, RESERVED, OCCUPIED"
+        },
+        "baseRent": {
+          "type": "number",
+          "description": "Base rate in GHS per month"
+        },
+        "assignedApplicationId": {
+          "type": "string",
+          "description": "Assigned occupant registration/application ID"
+        },
+        "assignedOccupantName": {
+          "type": "string",
+          "description": "Combined name of the assigned occupant"
+        },
+        "notes": {
+          "type": "string",
+          "description": "General notes, condition or specifications"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["id", "name", "categoryId", "subType", "status"]
+    },
+    "user": {
+      "title": "PortalUser",
+      "description": "Nsawam staff user record specifying their access role and capabilities",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Primary email or unique identifier of the staff user"
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the municipal staff member"
+        },
+        "role": {
+          "type": "string",
+          "description": "Access control role: REGISTRAR, LEASING_OFFICER, FINANCIAL_OFFICER, SUPER_USER"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp of the user account"
+        }
+      },
+      "required": ["email", "name", "role", "createdAt"]
+    },
+    "setting": {
+      "title": "Setting",
+      "description": "General system configuration and template settings",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier of the configuration document"
+        },
+        "lessorTitle": {
+          "type": "string",
+          "description": "Name of the Lessor, e.g. NSAWAM MUNICIPAL ASSEMBLY"
+        },
+        "officeTitle": {
+          "type": "string",
+          "description": "Office of the signing authority"
+        },
+        "boxAddress": {
+          "type": "string",
+          "description": "Postal address and location"
+        },
+        "lessorDesc": {
+          "type": "string",
+          "description": "Lessor indenture description text"
+        },
+        "recitals": {
+          "type": "string",
+          "description": "WHEREAS recitals clause"
+        },
+        "termsList": {
+          "type": "array",
+          "description": "Array of dynamic tenancy terms and rules"
+        },
+        "witnessStatement": {
+          "type": "string",
+          "description": "Witness and signature legal phrase"
+        },
+        "statutoryText": {
+          "type": "string",
+          "description": "Act of Parliament or ministry footer markings"
+        },
+        "storeRentRate": {
+          "type": "number",
+          "description": "Central monthly rent rate for Stores (GHS)"
+        },
+        "shedRentRate": {
+          "type": "number",
+          "description": "Central monthly rent rate for Sheds (GHS)"
+        }
+      },
+      "required": ["id"]
+    },
+    "sms_log": {
+      "title": "SmsLog",
+      "description": "Wigal Gateway SMS dispatch trace record for audit tracking",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier of the SMS trace log"
+        },
+        "to": {
+          "type": "string",
+          "description": "Recipient contact phone number"
+        },
+        "message": {
+          "type": "string",
+          "description": "Text body of the SMS sent"
+        },
+        "sentAt": {
+          "type": "string",
+          "description": "Timestamp of dispatch"
+        },
+        "status": {
+          "type": "string",
+          "description": "SUCCESS or FAILED delivery status"
+        },
+        "statusCode": {
+          "type": "number",
+          "description": "HTTP status code returned by Wigal Gateway"
+        },
+        "error": {
+          "type": "string",
+          "description": "Detailed failure cause or error message if FAILED"
+        },
+        "clientId": {
+          "type": "number",
+          "description": "Wigal client ID used for sending"
+        },
+        "senderId": {
+          "type": "number",
+          "description": "Wigal sender ID index used for sending"
+        }
+      },
+      "required": ["id", "to", "message", "sentAt", "status", "statusCode"]
+    }
+  },
+  "firestore": {
+    "categories/{categoryId}": {
+      "schema": "category",
+      "description": "Dynamic configurations of properties, sub-types, and attributes managed by IT Admins"
+    },
+    "applications/{applicationId}": {
+      "schema": "application",
+      "description": "Applications tracking life-cycle from registration to payment"
+    },
+    "assets/{assetId}": {
+      "schema": "asset",
+      "description": "Registry of commercial and residential assets managed by the estate unit"
+    },
+    "users/{userId}": {
+      "schema": "user",
+      "description": "Authenticated users registry and active roles index"
+    },
+    "settings/{settingId}": {
+      "schema": "setting",
+      "description": "System settings and dynamic document templates"
+    },
+    "sms_logs/{logId}": {
+      "schema": "sms_log",
+      "description": "Outbound Wigal SMS logs tracking delivery status"
+    }
+  }
+}

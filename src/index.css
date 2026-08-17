@@ -1,0 +1,323 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Custom scrollbar styling for slick panels */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* 
+  =========================================
+  PROFESSIONAL PRINT-FRIENDLY CSS STYLESHEET
+  =========================================
+  Optimizes physical paper layout and spacing.
+  Hides all navigation, headers, modal overlays,
+  and background structures during printing.
+*/
+@media print {
+  /* Setup clean page properties and print margins */
+  @page {
+    size: A4 portrait;
+    margin: 10mm 12mm 10mm 12mm;
+  }
+
+  /* Reset layout constraints and suppress browser-specific scrollbars */
+  html, body {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 10pt !important;
+    line-height: 1.35 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* 
+    Strict visibility control: hide everything under the body by default, 
+    and selectively show only the active printable document content.
+  */
+  body * {
+    visibility: hidden !important;
+  }
+
+  /* 
+    The designated print document containers and their descendants 
+    remain fully visible.
+  */
+  #printable-rent-bill-document,
+  #printable-rent-bill-document *,
+  #printable-rent-bills-container,
+  #printable-rent-bills-container *,
+  #printable-bulk-allocation-letters-container,
+  #printable-bulk-allocation-letters-container *,
+  #printable-receipt-content,
+  #printable-receipt-content *,
+  #printable-allocation-letter-content,
+  #printable-allocation-letter-content *,
+  #printable-lease-agreement-content,
+  #printable-lease-agreement-content *,
+  .bulk-bill-page,
+  .bulk-bill-page *,
+  .bulk-allocation-letter-page,
+  .bulk-allocation-letter-page * {
+    visibility: visible !important;
+  }
+
+  /* 
+    Make sure that any active printable modal wrapper behaves as a 
+    standard document flow element, instead of an absolutely centered box.
+    This resolves the issue where long agreements are clipped at the top/bottom.
+  */
+  #printable-lease-agreement-modal,
+  #printable-allocation-letter-modal,
+  #printable-receipt-modal,
+  #rent-bill-print-modal,
+  #rent-bills-bulk-print-modal,
+  #bulk-allocation-letters-print-modal {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    display: block !important;
+    background: #ffffff !important;
+    z-index: 99999 !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    visibility: visible !important;
+  }
+
+  /* Strip the screen-only inner wrapper styles (rounded corners, shadows, borders) */
+  #printable-lease-agreement-modal > div,
+  #printable-allocation-letter-modal > div,
+  #printable-receipt-modal > div,
+  #rent-bill-print-modal > div,
+  #rent-bills-bulk-print-modal > div,
+  #bulk-allocation-letters-print-modal > div {
+    position: relative !important;
+    display: block !important;
+    box-shadow: none !important;
+    border: none !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    background: #ffffff !important;
+    visibility: visible !important;
+  }
+
+  /* 
+    Align content into standard, printable page-flow.
+    By using 'position: relative', multi-page documents like the Tenancy Lease Indenture
+    can naturally overflow onto pages 2, 3, etc. without being cut off or overlapped.
+  */
+  #printable-rent-bill-document,
+  #printable-rent-bills-container,
+  #printable-receipt-content,
+  #printable-allocation-letter-content,
+  #printable-lease-agreement-content {
+    position: relative !important;
+    display: block !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+  }
+
+  /* Strict Spacing & Density Compression for Allocation Letter and Lease Agreement to fit on A4 */
+  #printable-allocation-letter-content,
+  #printable-lease-agreement-content {
+    font-size: 9pt !important;
+    line-height: 1.32 !important;
+    color: #000000 !important;
+    page-break-inside: avoid !important;
+    box-sizing: border-box !important;
+  }
+
+  #printable-allocation-letter-content *,
+  #printable-lease-agreement-content * {
+    font-size: inherit;
+    line-height: inherit;
+  }
+
+  /* Override Tailwind space-y classes when printing */
+  #printable-allocation-letter-content.space-y-6,
+  #printable-lease-agreement-content.space-y-6,
+  #printable-allocation-letter-content .space-y-4,
+  #printable-lease-agreement-content .space-y-4,
+  #printable-allocation-letter-content .space-y-6,
+  #printable-lease-agreement-content .space-y-3,
+  #printable-lease-agreement-content .space-y-2.5,
+  #printable-lease-agreement-content .space-y-2 {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }
+
+  /* Apply extremely tight sibling spacing inside the printable page */
+  #printable-allocation-letter-content > div:not(:first-child),
+  #printable-lease-agreement-content > div:not(:first-child) {
+    margin-top: 2.5mm !important;
+    margin-bottom: 0 !important;
+    padding-top: 0 !important;
+  }
+
+  /* Letterhead section spacing */
+  #printable-allocation-letter-content .pb-4,
+  #printable-lease-agreement-content .pb-4 {
+    padding-bottom: 1.5mm !important;
+    margin-bottom: 1.5mm !important;
+  }
+
+  #printable-allocation-letter-content .pt-4,
+  #printable-lease-agreement-content .pt-4 {
+    padding-top: 1.5mm !important;
+  }
+
+  #printable-allocation-letter-content .pt-6,
+  #printable-lease-agreement-content .pt-6 {
+    padding-top: 2.5mm !important;
+  }
+
+  #printable-allocation-letter-content .my-2 {
+    margin-top: 1mm !important;
+    margin-bottom: 1mm !important;
+  }
+
+  /* Ensure bullet/number spacing is tight */
+  #printable-allocation-letter-content ul,
+  #printable-lease-agreement-content ol {
+    margin-top: 1mm !important;
+    margin-bottom: 1mm !important;
+    padding-left: 12px !important;
+  }
+
+  #printable-allocation-letter-content ul li,
+  #printable-lease-agreement-content ol li {
+    margin-bottom: 0.8mm !important;
+  }
+
+  /* Distinct and proportional constraints for letterhead emblem, passport photos, and signatures */
+  #printable-allocation-letter-content img[alt="Custom Emblem"],
+  #printable-lease-agreement-content img[alt="Custom Emblem"] {
+    max-height: 40px !important;
+    width: auto !important;
+    object-fit: contain !important;
+  }
+
+  #printable-allocation-letter-content img[alt="Applicant Passport"],
+  #printable-lease-agreement-content img[alt="Applicant Passport"] {
+    max-height: 65px !important;
+    width: auto !important;
+    object-fit: cover !important;
+  }
+
+  #printable-allocation-letter-content img[alt="Authorized Signature"],
+  #printable-lease-agreement-content img[alt="Authorized Signature"] {
+    max-height: 30px !important;
+    width: auto !important;
+    object-fit: contain !important;
+  }
+
+  /* Seal backdrop adjustments */
+  #printable-allocation-letter-content .absolute.bottom-6,
+  #printable-allocation-letter-content .absolute.bottom-1 {
+    bottom: 2mm !important;
+  }
+
+  /* Allow lease agreement contents to break across pages cleanly if still needed, but prevent weird mid-line breaks */
+  #printable-lease-agreement-content {
+    page-break-inside: auto !important;
+  }
+  #printable-lease-agreement-content * {
+    page-break-inside: auto !important;
+  }
+
+  /* Ensure the bulk print container allows unconstrained flow across page boundaries */
+  #printable-rent-bills-container,
+  #printable-bulk-allocation-letters-container {
+    max-height: none !important;
+    overflow-y: visible !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Spacing and page break directives for high-volume bulk print layouts */
+  .bulk-bill-page,
+  .bulk-allocation-letter-page {
+    page-break-after: always !important;
+    break-after: page !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 0 20mm 0 !important;
+    height: auto !important;
+    background: #ffffff !important;
+  }
+
+  /* Ensure the last page in a bulk series does not produce a trailing blank sheet */
+  .bulk-bill-page:last-child,
+  .bulk-allocation-letter-page:last-child {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+    margin-bottom: 0 !important;
+  }
+
+  /* Optimize contrast and remove screen-specific shadows or custom backgrounds */
+  .print-no-shadow, 
+  .shadow-sm, .shadow, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl {
+    box-shadow: none !important;
+  }
+
+  .border, .border-2, .border-dashed, .border-double {
+    border-color: #1e293b !important; /* Crisp charcoal for printable borders */
+  }
+
+  /* Suppress screen-only interactive states, scrollbars, and floating backdrops */
+  .print\:hidden,
+  .no-print,
+  #print-all-bills-btn,
+  #printable-receipt-modal button,
+  #printable-allocation-letter-modal button,
+  #printable-lease-agreement-modal button,
+  #rent-bill-print-modal button,
+  #rent-bills-bulk-print-modal button {
+    display: none !important;
+    visibility: hidden !important;
+  }
+}
