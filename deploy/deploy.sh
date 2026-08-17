@@ -25,12 +25,16 @@ if ! command -v git >/dev/null 2>&1; then
 fi
 
 echo "==> Syncing code into ${APP_DIR}"
-if [ ! -d "${APP_DIR}/.git" ]; then
-  sudo mkdir -p "${APP_DIR}"
-  sudo chown "${DEPLOY_USER}:${DEPLOY_USER}" "${APP_DIR}"
-  git clone "${REPO_URL}" "${APP_DIR}"
-fi
+sudo mkdir -p "${APP_DIR}"
+sudo chown "${DEPLOY_USER}:${DEPLOY_USER}" "${APP_DIR}"
 cd "${APP_DIR}"
+if [ ! -d "${APP_DIR}/.git" ]; then
+  # Directory may already exist with a hand-created .env in it (expected on
+  # first deploy) or be genuinely empty — either way, init in place rather
+  # than `git clone`, which refuses to write into a non-empty directory.
+  git init -b main
+  git remote add origin "${REPO_URL}"
+fi
 git fetch origin main
 git reset --hard origin/main
 
