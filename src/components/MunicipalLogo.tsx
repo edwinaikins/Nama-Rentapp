@@ -1,5 +1,6 @@
 import React from "react";
-import { useGlobalLogoUrl } from "../utils/logoState";
+import { Loader2 } from "lucide-react";
+import { useGlobalLogoUrl, useGlobalLogoLoaded } from "../utils/logoState";
 
 interface MunicipalLogoProps {
   className?: string;
@@ -8,6 +9,27 @@ interface MunicipalLogoProps {
 
 export default function MunicipalLogo({ className = "", size = 48 }: MunicipalLogoProps) {
   const customLogoUrl = useGlobalLogoUrl();
+  const logoLoaded = useGlobalLogoLoaded();
+
+  // Show a spinner instead of the fallback seal for the brief moment
+  // before we know whether a custom logo has been uploaded — otherwise a
+  // real uploaded logo would visibly "pop in" a beat after the seal
+  // flashes on screen first.
+  if (!logoLoaded) {
+    const spinnerSize = typeof size === "number" ? Math.max(14, Math.round(size * 0.4)) : size;
+    return (
+      <div
+        className={`shrink-0 select-none rounded-full bg-white border border-slate-200 flex items-center justify-center ${className}`}
+        style={{ width: size, height: size }}
+        id="nsawam-municipal-assembly-logo-loading"
+      >
+        <Loader2
+          className="animate-spin text-slate-300"
+          style={{ width: spinnerSize, height: spinnerSize }}
+        />
+      </div>
+    );
+  }
 
   if (customLogoUrl) {
     return (

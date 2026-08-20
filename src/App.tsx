@@ -256,6 +256,10 @@ export default function App() {
       },
       (error) => {
         console.warn("Failed to fetch global logo from Firestore:", error);
+        // Still resolve "loaded" on failure — falls back to the default
+        // seal instead of leaving MunicipalLogo's loading spinner stuck
+        // forever if this read never succeeds.
+        setGlobalLogoUrl("");
       }
     );
 
