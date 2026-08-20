@@ -74,6 +74,20 @@ export default function OverviewDashboard({
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState("all");
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<"all" | ApplicationStatus>("all");
+
+  // Applicant Database Log pagination — showing all ~600 records at once
+  // was itself part of the original load-time problem (every card render,
+  // every event handler closure, for records nobody is looking at). 20 per
+  // page keeps the DOM small and, just as importantly, keeps the batch of
+  // applicant photos fetched per page (see listPagePhotos below) small too.
+  const APPLICANT_LOG_PAGE_SIZE = 20;
+  const [applicantLogPage, setApplicantLogPage] = useState(1);
+  // Applicant photos for whichever page of the log is currently visible,
+  // keyed by application id. Batch-fetched from application_media/{id} —
+  // see types.ts — only for the ~20 ids on screen, so paging through the
+  // whole list costs one small read per page rather than one big read for
+  // all ~600 records up front.
+  const [listPagePhotos, setListPagePhotos] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState<"database" | "analytics" | "sms" | "billing">(
     currentUser?.role === "REGISTRAR" ? "analytics" : "database"
   );
@@ -531,6 +545,54 @@ export default function OverviewDashboard({
       return matchesSearch && matchesCategory && matchesStatus;
     });
   }, [applications, searchTerm, selectedCategoryFilter, selectedStatusFilter]);
+
+  // Whenever the filtered set changes shape (a new search term, a category
+  // or status filter, or the underlying data itself), jump back to page 1
+  // rather than leaving the user stranded on a now out-of-range page.
+  useEffect(() => {
+    setApplicantLogPage(1);
+  }, [searchTerm, selectedCategoryFilter, selectedStatusFilter]);
+
+  const applicantLogTotalPages = Math.max(1, Math.ceil(filteredApplications.length / APPLICANT_LOG_PAGE_SIZE));
+
+  // Clamp defensively — e.g. the list shrinks (a record gets deleted) while
+  // sitting on what's now the last page.
+  const applicantLogCurrentPage = Math.min(applicantLogPage, applicantLogTotalPages);
+
+  const paginatedApplications = useMemo(() => {
+    const start = (applicantLogCurrentPage - 1) * APPLICANT_LOG_PAGE_SIZE;
+    return filteredApplications.slice(start, start + APPLICANT_LOG_PAGE_SIZE);
+  }, [filteredApplications, applicantLogCurrentPage]);
+
+  // Batch-fetch applicant photos for just the ~20 ids on the current page.
+  // Deliberately a one-shot fetch (not a listener) that only runs for ids
+  // we haven't already fetched, so paging back to a previously-seen page
+  // is instant and doesn't re-fetch.
+  useEffect(() => {
+    let cancelled = false;
+    const idsNeeded = paginatedApplications.map(a => a.id).filter(id => !(id in listPagePhotos));
+    if (idsNeeded.length === 0) return;
+    Promise.all(
+      idsNeeded.map(async (id) => {
+        try {
+          const snap = await getDoc(doc(db, "application_media", id));
+          return [id, snap.exists() ? (snap.data().photo || "") : ""] as const;
+        } catch (error) {
+          console.warn(`Failed to fetch application_media/${id} for list thumbnail:`, error);
+          return [id, ""] as const;
+        }
+      })
+    ).then((entries) => {
+      if (cancelled) return;
+      setListPagePhotos(prev => {
+        const next = { ...prev };
+        entries.forEach(([id, photo]) => { next[id] = photo; });
+        return next;
+      });
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paginatedApplications.map(a => a.id).join(",")]);
 
   // Was previously duplicated verbatim twice in the JSX below (once to
   // check .length > 0, once to actually render) — memoized and computed
@@ -1364,7 +1426,7 @@ export default function OverviewDashboard({
 
             {filteredApplications.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {filteredApplications.map(app => {
+                {paginatedApplications.map(app => {
                   const appCat = categories.find(c => c.id === app.categoryId);
                   const isAllocated = app.status === "RESERVED" || app.status === "AWAITING_PAYMENT" || app.status === "OCCUPIED" || !!app.assetCode;
                   return (
@@ -1373,17 +1435,26 @@ export default function OverviewDashboard({
                       onClick={() => onSelectApplication(app)}
                       className="bg-white rounded-3xl border border-slate-150 p-4 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer flex gap-4 text-left group"
                     >
-                      {/* Avatar thumbnail — deliberately a static placeholder,
-                          not a per-row photo fetch. The applicant photo now
-                          lives in application_media/{id} (see types.ts), and
-                          fetching it for every row in this list would
-                          reintroduce the exact N-way read cost that moving
-                          it out of the applications doc was meant to avoid.
-                          The real photo is one click away in the detail view. */}
+                      {/* Avatar thumbnail — a real photo, but only ever
+                          fetched for the ~20 applicants on the current page
+                          (see listPagePhotos above). The applicant photo
+                          lives in application_media/{id} (see types.ts),
+                          not on the applications doc the always-on
+                          dashboard listener downloads, so paging is what
+                          keeps this affordable at ~600 records. */}
                       <div className="w-16 h-16 rounded-2xl overflow-hidden bg-slate-100 shrink-0 border border-slate-200 relative shadow-inner">
-                        <div className="w-full h-full flex items-center justify-center text-slate-350">
-                          <User className="w-6 h-6" />
-                        </div>
+                        {listPagePhotos[app.id] ? (
+                          <img
+                            src={listPagePhotos[app.id]}
+                            referrerPolicy="no-referrer"
+                            alt="Thumbnail"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-slate-350">
+                            <User className="w-6 h-6" />
+                          </div>
+                        )}
                         <span className="absolute bottom-0 left-0 right-0 bg-black/50 text-[8px] text-center text-white py-0.5 leading-none">
                           {app.id}
                         </span>
@@ -1505,6 +1576,37 @@ export default function OverviewDashboard({
                 >
                   Clear Filters
                 </button>
+              </div>
+            )}
+
+            {/* Pagination controls */}
+            {filteredApplications.length > APPLICANT_LOG_PAGE_SIZE && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-2 pt-1">
+                <span className="text-[11px] text-slate-400 font-medium">
+                  Showing {(applicantLogCurrentPage - 1) * APPLICANT_LOG_PAGE_SIZE + 1}
+                  –{Math.min(applicantLogCurrentPage * APPLICANT_LOG_PAGE_SIZE, filteredApplications.length)} of {filteredApplications.length}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setApplicantLogPage(p => Math.max(1, p - 1))}
+                    disabled={applicantLogCurrentPage === 1}
+                    className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-bold rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-xs font-bold text-slate-500 px-2 font-mono">
+                    Page {applicantLogCurrentPage} / {applicantLogTotalPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setApplicantLogPage(p => Math.min(applicantLogTotalPages, p + 1))}
+                    disabled={applicantLogCurrentPage === applicantLogTotalPages}
+                    className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-bold rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
             )}
           </div>
