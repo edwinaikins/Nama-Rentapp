@@ -59,6 +59,16 @@ service cloud.firestore {
       allow update, delete: if isSuperUser();
     }
 
+    // The municipal logo is displayed on the public, pre-auth login
+    // screen, so it has to be readable before anyone signs in — unlike
+    // everything else in settings/, which is only meaningful once you're
+    // already inside the app. Writes still require staff; only the read
+    // is opened up, and only for this one document.
+    match /settings/global_logo {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+
     // Everything else (tenant applications, assets, SMS logs, rent
     // settings, templates, etc.) requires a signed-in, ACTIVE staff
     // session — not merely "signed in", which was the previous gap that

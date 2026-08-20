@@ -236,10 +236,14 @@ export default function App() {
     return () => unsub();
   }, [authUid]);
 
-  // Synchronize Global Logo from Firestore. Gated on being signed in for
-  // the same reason as the agreement template effect above.
+  // Synchronize Global Logo from Firestore. Deliberately NOT gated on
+  // authUid, unlike the other settings effects: the logo needs to render
+  // on the public, pre-auth login screen too, and firestore.rules now
+  // grants this one specific document a public read (see
+  // settings/global_logo in firestore.rules) so this subscription
+  // actually succeeds before sign-in instead of failing "Missing or
+  // insufficient permissions" like the rest would.
   useEffect(() => {
-    if (!authUid) return;
     const logoDocRef = doc(db, "settings", "global_logo");
     const unsub = onSnapshot(
       logoDocRef,
@@ -256,7 +260,7 @@ export default function App() {
     );
 
     return () => unsub();
-  }, [authUid]);
+  }, []);
 
   // Synchronize Global Signature & Signee info from Firestore. Gated on
   // being signed in for the same reason as the agreement template effect.
