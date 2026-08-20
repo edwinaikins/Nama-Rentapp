@@ -645,6 +645,21 @@ export default function App() {
           return;
         }
 
+        // Firestore applies writes to its local cache optimistically and
+        // fires this listener with that unconfirmed state BEFORE the
+        // backend has actually accepted (or rejected) the write. Acting on
+        // that here — e.g. signing the user out as "pending review" — means
+        // that if the write is then rejected server-side a moment later,
+        // we've already torn down the session and nothing is left
+        // listening to notice: the doc silently reverts to not existing,
+        // but the person only ever saw a normal-looking "pending review"
+        // message, never an error. Wait for the server-confirmed snapshot
+        // before acting on any status here; the self-provisioning setDoc()
+        // above already has its own try/catch for a genuine write failure.
+        if (snap.metadata.hasPendingWrites) {
+          return;
+        }
+
         const profile = { ...(snap.data() as PortalUser), uid: snap.id };
 
         if (profile.status === "PENDING") {
