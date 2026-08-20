@@ -73,8 +73,14 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Synchronize Agreement Template from Firestore
+  // Synchronize Agreement Template from Firestore. Gated on an approved
+  // (currentUser) profile: this collection requires isStaff() per
+  // firestore.rules, so subscribing before sign-in/approval always fails
+  // with "Missing or insufficient permissions" — that's expected, but it
+  // was firing on every visit to the login screen for no reason, wasting a
+  // round trip and filling the console with alarming-looking noise.
   useEffect(() => {
+    if (!currentUser) return;
     const templateDocRef = doc(db, "settings", "agreement_template");
     const unsub = onSnapshot(
       templateDocRef,
@@ -99,10 +105,12 @@ export default function App() {
     );
 
     return () => unsub();
-  }, []);
+  }, [currentUser]);
 
-  // Synchronize SMS Templates from Firestore
+  // Synchronize SMS Templates from Firestore. Gated on an approved profile
+  // for the same reason as the agreement template effect above.
   useEffect(() => {
+    if (!currentUser) return;
     const templatesDocRef = doc(db, "settings", "sms_templates");
     const unsub = onSnapshot(
       templatesDocRef,
@@ -127,10 +135,12 @@ export default function App() {
     );
 
     return () => unsub();
-  }, []);
+  }, [currentUser]);
 
-  // Synchronize Allocation Letter Template from Firestore
+  // Synchronize Allocation Letter Template from Firestore. Gated on an
+  // approved profile for the same reason as the agreement template effect.
   useEffect(() => {
+    if (!currentUser) return;
     const templateDocRef = doc(db, "settings", "allocation_letter_template");
     const unsub = onSnapshot(
       templateDocRef,
@@ -155,10 +165,12 @@ export default function App() {
     );
 
     return () => unsub();
-  }, []);
+  }, [currentUser]);
 
-  // Synchronize Rent Rates from Firestore
+  // Synchronize Rent Rates from Firestore. Gated on an approved profile for
+  // the same reason as the agreement template effect above.
   useEffect(() => {
+    if (!currentUser) return;
     const rentRatesDocRef = doc(db, "settings", "rent_rates");
     const unsub = onSnapshot(
       rentRatesDocRef,
@@ -187,10 +199,12 @@ export default function App() {
     );
 
     return () => unsub();
-  }, []);
+  }, [currentUser]);
 
-  // Synchronize Rent Bill Template from Firestore
+  // Synchronize Rent Bill Template from Firestore. Gated on an approved
+  // profile for the same reason as the agreement template effect above.
   useEffect(() => {
+    if (!currentUser) return;
     const templateDocRef = doc(db, "settings", "rent_bill_template");
     const unsub = onSnapshot(
       templateDocRef,
@@ -215,10 +229,12 @@ export default function App() {
     );
 
     return () => unsub();
-  }, []);
+  }, [currentUser]);
 
-  // Synchronize Global Logo from Firestore
+  // Synchronize Global Logo from Firestore. Gated on an approved profile
+  // for the same reason as the agreement template effect above.
   useEffect(() => {
+    if (!currentUser) return;
     const logoDocRef = doc(db, "settings", "global_logo");
     const unsub = onSnapshot(
       logoDocRef,
@@ -235,10 +251,12 @@ export default function App() {
     );
 
     return () => unsub();
-  }, []);
+  }, [currentUser]);
 
-  // Synchronize Global Signature & Signee info from Firestore
+  // Synchronize Global Signature & Signee info from Firestore. Gated on an
+  // approved profile for the same reason as the agreement template effect.
   useEffect(() => {
+    if (!currentUser) return;
     const sigDocRef = doc(db, "settings", "global_signature");
     const unsub = onSnapshot(
       sigDocRef,
@@ -263,10 +281,12 @@ export default function App() {
     );
 
     return () => unsub();
-  }, []);
+  }, [currentUser]);
 
-  // Synchronize Assets from Firestore in real-time
+  // Synchronize Assets from Firestore in real-time. Gated on an approved
+  // profile for the same reason as the agreement template effect above.
   useEffect(() => {
+    if (!currentUser) return;
     const assetsCol = collection(db, "assets");
     const unsub = onSnapshot(
       assetsCol,
@@ -317,10 +337,13 @@ export default function App() {
     );
 
     return () => unsub();
-  }, []);
+  }, [currentUser]);
 
-  // Synchronize dynamic Category Configurations from Firestore in real-time
+  // Synchronize dynamic Category Configurations from Firestore in
+  // real-time. Gated on an approved profile for the same reason as the
+  // agreement template effect above.
   useEffect(() => {
+    if (!currentUser) return;
     const categoriesCol = collection(db, "categories");
     const unsub = onSnapshot(
       categoriesCol,
@@ -364,7 +387,7 @@ export default function App() {
     );
 
     return () => unsub();
-  }, []);
+  }, [currentUser]);
 
   // Helper to safely extract epoch milliseconds from any date/Timestamp object
   const getMs = (dateVal: any): number => {
@@ -379,8 +402,14 @@ export default function App() {
     return isNaN(t) ? 0 : t;
   };
 
-  // Synchronize Applications and Applicants from Firestore in real-time
+  // Synchronize Applications and Applicants from Firestore in real-time.
+  // Gated on an approved profile for the same reason as the agreement
+  // template effect above.
   useEffect(() => {
+    if (!currentUser) {
+      setLoading(false);
+      return;
+    }
     const rawMap = new Map<string, Application>();
 
     const updateCombinedApplications = () => {
@@ -508,10 +537,12 @@ export default function App() {
       unsub4();
       unsub5();
     };
-  }, []);
+  }, [currentUser]);
 
-  // Synchronize SMS Logs from Firestore in real-time
+  // Synchronize SMS Logs from Firestore in real-time. Gated on an approved
+  // profile for the same reason as the agreement template effect above.
   useEffect(() => {
+    if (!currentUser) return;
     const smsLogsCol = collection(db, "sms_logs");
     const unsub = onSnapshot(
       smsLogsCol,
@@ -530,7 +561,7 @@ export default function App() {
     );
 
     return () => unsub();
-  }, []);
+  }, [currentUser]);
 
   // Synchronize Portal Users from Firestore in real-time. This list is used
   // for display (Settings > Users) and for pre-auth existence checks
