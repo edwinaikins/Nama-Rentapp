@@ -151,6 +151,15 @@ export default function CameraCapture({ onCapture, savedPhoto }: CameraCapturePr
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // This photo is stored base64-inline on the application document,
+    // which has a hard ~1MB Firestore limit — same reasoning as the other
+    // upload caps in ClientBioTab/ApplicationDetails/ClientAllocationLetterTab.
+    if (file.size > 650 * 1024) {
+      setCameraError("Photo file size exceeds 650KB. Please use a smaller/compressed photo.");
+      e.target.value = "";
+      return;
+    }
+
     const reader = new FileReader();
     reader.onloadend = () => {
       const base64 = reader.result as string;
@@ -234,7 +243,9 @@ export default function CameraCapture({ onCapture, savedPhoto }: CameraCapturePr
             </div>
             <div>
               <p className="text-xs font-medium text-slate-700">No Image Selected</p>
-              <p className="text-[11px] text-slate-400 mt-1">Take a photo, upload an image, or use a simulated portrait</p>
+              <p className="text-[11px] text-slate-400 mt-1">
+                {import.meta.env.DEV ? "Take a photo, upload an image, or use a simulated portrait" : "Take a photo or upload an image"}
+              </p>
             </div>
             <button
               type="button"
@@ -271,34 +282,43 @@ export default function CameraCapture({ onCapture, savedPhoto }: CameraCapturePr
           </label>
         </div>
 
-        <div className="space-y-2">
-          <span className="font-semibold text-slate-600 flex items-center gap-1">
-            <RefreshCw className="w-3.5 h-3.5 animate-spin-slow" /> Option B: Simulate Applicant Portrait
-          </span>
-          <div className="grid grid-cols-3 gap-2">
-            {SIMULATED_PORTRAITS.map((p, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => handleSelectSimulated(p)}
-                className="group relative rounded-lg overflow-hidden aspect-square border-2 border-transparent hover:border-indigo-900 transition-all text-left"
-                title={p.name}
-              >
-                <img
-                  src={p.url}
-                  referrerPolicy="no-referrer"
-                  alt={p.name}
-                  className="w-full h-full object-cover"
-                />
-                <div className="absolute inset-0 bg-black/40 flex items-end p-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <span className="text-[9px] text-white leading-none font-medium truncate w-full">
-                    {p.name.split(" ")[0]}
-                  </span>
-                </div>
-              </button>
-            ))}
+        {/* Dev/testing only: a stock-photo picker has no business being
+            reachable in production for a Ghana Card-linked identity
+            record — someone could register a real tenant using a fake
+            portrait instead of an actual captured photo. import.meta.env.DEV
+            is Vite's built-in flag (true only under `vite dev`, always
+            false in a production build), so this block is compiled out of
+            what actually ships. */}
+        {import.meta.env.DEV && (
+          <div className="space-y-2">
+            <span className="font-semibold text-slate-600 flex items-center gap-1">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin-slow" /> Option B: Simulate Applicant Portrait (dev only)
+            </span>
+            <div className="grid grid-cols-3 gap-2">
+              {SIMULATED_PORTRAITS.map((p, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => handleSelectSimulated(p)}
+                  className="group relative rounded-lg overflow-hidden aspect-square border-2 border-transparent hover:border-indigo-900 transition-all text-left"
+                  title={p.name}
+                >
+                  <img
+                    src={p.url}
+                    referrerPolicy="no-referrer"
+                    alt={p.name}
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute inset-0 bg-black/40 flex items-end p-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span className="text-[9px] text-white leading-none font-medium truncate w-full">
+                      {p.name.split(" ")[0]}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

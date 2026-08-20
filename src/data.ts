@@ -1,35 +1,12 @@
-import { Category, Application, Asset, PortalUser, Setting, SmsTemplatesSetting, AllocationLetterSetting, RentRatesSetting, RentBillTemplateSetting, GlobalSignatureSetting } from "./types";
+import { Category, Application, Asset, Setting, SmsTemplatesSetting, AllocationLetterSetting, RentRatesSetting, RentBillTemplateSetting, GlobalSignatureSetting } from "./types";
 
-export const DEFAULT_SEED_USERS: PortalUser[] = [
-  {
-    email: "edwin@zamsonia.com",
-    name: "Edwin Zamsonia (MCE Admin)",
-    role: "SUPER_USER",
-    createdAt: new Date().toISOString(),
-    status: "ACTIVE"
-  },
-  {
-    email: "registrar@nsawam.gov.gh",
-    name: "Amma Osei (Registrar Clerk)",
-    role: "REGISTRAR",
-    createdAt: new Date().toISOString(),
-    status: "ACTIVE"
-  },
-  {
-    email: "leasing@nsawam.gov.gh",
-    name: "Kofi Mensah (Leasing Allocator)",
-    role: "LEASING_OFFICER",
-    createdAt: new Date().toISOString(),
-    status: "ACTIVE"
-  },
-  {
-    email: "finance@nsawam.gov.gh",
-    name: "Yaw Boateng (Treasury Cashier)",
-    role: "FINANCIAL_OFFICER",
-    createdAt: new Date().toISOString(),
-    status: "ACTIVE"
-  }
-];
+// Note: the placeholder DEFAULT_SEED_USERS scaffolding (a hardcoded
+// edwin@zamsonia.com SUPER_USER account among others) that used to live
+// here has been removed — it was dead code once the Firestore RBAC rewrite
+// replaced client-side auto-seeding with real self-registration + admin
+// approval. If a document with that old placeholder email still exists in
+// Firestore, delete it from the Firebase Console — it's not created by the
+// app anymore.
 
 export const DEFAULT_SEED_CATEGORIES: Category[] = [
   {

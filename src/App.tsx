@@ -461,8 +461,17 @@ export default function App() {
       return onSnapshot(
         collection(db, colName),
         (snapshot) => {
-          snapshot.forEach((docSnap) => {
-            rawMap.set(docSnap.id, normalizeDoc(docSnap));
+          // Use docChanges (not snapshot.forEach) so a deletion is actually
+          // reflected: forEach only iterates documents CURRENTLY present,
+          // so a removed doc was previously just skipped, leaving its old
+          // entry stuck in rawMap forever (a deleted application stayed
+          // visible on the dashboard until a full page reload).
+          snapshot.docChanges().forEach((change) => {
+            if (change.type === "removed") {
+              rawMap.delete(change.doc.id);
+            } else {
+              rawMap.set(change.doc.id, normalizeDoc(change.doc));
+            }
           });
           updateCombinedApplications();
         },

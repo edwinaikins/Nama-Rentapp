@@ -344,7 +344,13 @@ export default function AssetRegistry({ assets, categories, applications, onClos
       return;
     }
 
-    const cleanId = assetId.trim().toUpperCase();
+    // Asset Code/ID is free-typed by the user (e.g. "BLK-A/101"-style codes
+    // are a plausible municipal naming convention) but is also used directly
+    // as the Firestore document ID below — a "/" in a doc ID is interpreted
+    // as a path separator, silently writing into the wrong location instead
+    // of a flat "assets/<id>" doc. Strip slashes the same way the bulk
+    // import path already does (see safeDocId above).
+    const cleanId = assetId.trim().toUpperCase().replace(/\//g, "-");
 
     // Check code duplication for NEW assets
     if (!editingAsset) {
@@ -395,7 +401,7 @@ export default function AssetRegistry({ assets, categories, applications, onClos
     if (!assetToDelete) return;
     setIsDeleting(true);
     try {
-      await deleteDoc(doc(db, "assets", assetToDelete.id));
+      await deleteDoc(doc(db, "assets", assetToDelete.id.replace(/\//g, "-")));
       setIsDeleting(false);
       setShowDeleteModal(false);
       setAssetToDelete(null);

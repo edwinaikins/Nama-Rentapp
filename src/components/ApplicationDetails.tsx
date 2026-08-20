@@ -169,7 +169,7 @@ export default function ApplicationDetails({
       // Synchronize all assigned physical assets' statuses to OCCUPIED if moving to active occupancy
       if (newStatus === "OCCUPIED") {
         for (const asset of assignedAssetsList) {
-          await updateDoc(doc(db, "assets", asset.id), {
+          await updateDoc(doc(db, "assets", asset.id.replace(/\//g, "-")), {
             status: "OCCUPIED",
             updatedAt: new Date().toISOString()
           });
@@ -374,8 +374,13 @@ export default function ApplicationDetails({
   // Stage 3 -> Stage 4: Installment Payment & Activation
   const handleAddInstallment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!installmentAmount || Number(installmentAmount) <= 0) {
-      setPaymentError("Please enter a valid payment amount.");
+    // Number("some text") is NaN, and `NaN <= 0` is always false — so a
+    // non-numeric entry used to slip straight past this check and get
+    // stored as amountPaid: NaN, silently corrupting every total that
+    // sums payments afterward. isNaN() closes that gap explicitly.
+    const numericAmount = Number(installmentAmount);
+    if (!installmentAmount || isNaN(numericAmount) || numericAmount <= 0) {
+      setPaymentError("Please enter a valid numeric payment amount.");
       return;
     }
     if (!installmentReceiptNo.trim()) {
@@ -388,7 +393,7 @@ export default function ApplicationDetails({
 
     const newPayment = {
       id: "PAY-" + Math.random().toString(36).substring(2, 11).toUpperCase(),
-      amountPaid: Number(installmentAmount),
+      amountPaid: numericAmount,
       manualReceiptNo: installmentReceiptNo.trim().toUpperCase(),
       paymentDate: installmentDate || new Date().toISOString().split("T")[0],
       paymentMode: installmentMode,
@@ -420,7 +425,7 @@ export default function ApplicationDetails({
 
       // Synchronize all assigned physical assets' statuses to OCCUPIED
       for (const asset of assignedAssetsList) {
-        await updateDoc(doc(db, "assets", asset.id), {
+        await updateDoc(doc(db, "assets", asset.id.replace(/\//g, "-")), {
           status: "OCCUPIED",
           updatedAt: new Date().toISOString()
         });

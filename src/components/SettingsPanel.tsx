@@ -408,7 +408,12 @@ export default function SettingsPanel({ categories, users, onUpdate, onClose, ag
     }
 
     setSaving(true);
-    const categoryId = trackName.toLowerCase().replace(/[^a-z0-9]/g, "_").trim();
+    // When editing an existing track, keep writing to its original document
+    // ID even if the name (and therefore the slug derived from it) changed
+    // — otherwise a rename silently creates a brand-new document at the
+    // new slug and orphans the old one, along with every asset/application
+    // still referencing the original categoryId.
+    const categoryId = editingCategoryId || trackName.toLowerCase().replace(/[^a-z0-9]/g, "_").trim();
 
     const newCategory: Category = {
       id: categoryId,

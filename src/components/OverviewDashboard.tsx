@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { doc, updateDoc, writeBatch, deleteDoc } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { Application, Category, ApplicationStatus, PortalUser, Asset, SmsLog, RentRatesSetting, RentBillTemplateSetting, GlobalSignatureSetting } from "../types";
@@ -218,8 +218,29 @@ export default function OverviewDashboard({
     setPrintAllBills(true);
   };
 
-  // Filter out occupied applications who are eligible for annual rent bill generation
-  const activeTenants = applications.filter(app => app.status === "OCCUPIED" || app.status === "AWAITING_PAYMENT");
+  // Tenants eligible for annual rent bill generation — OCCUPIED only.
+  // AWAITING_PAYMENT means the lease is signed but the tenant hasn't made
+  // their first payment or moved in yet, so sending them "your annual rent
+  // bill" is premature; they become eligible once handleAddInstallment
+  // transitions them to OCCUPIED on their first logged payment.
+  const activeTenants = useMemo(
+    () => applications.filter(app => app.status === "OCCUPIED"),
+    [applications]
+  );
+
+  // The billingSearch-filtered view of activeTenants — was previously
+  // duplicated verbatim five times across the billing UI (a disabled-state
+  // check, a count label, and three separate render lists). Computed once
+  // here and reused everywhere below instead.
+  const billingFilteredTenants = useMemo(() => {
+    const term = billingSearch.toLowerCase();
+    return activeTenants.filter(app => {
+      const name = `${app.firstName} ${app.surname}`.toLowerCase();
+      const code = (app.assetCode || "").toLowerCase();
+      const subType = (app.subType || "").toLowerCase();
+      return name.includes(term) || code.includes(term) || subType.includes(term);
+    });
+  }, [activeTenants, billingSearch]);
 
   // Individual Explicit Store Selection States
   const [selectingAppForStore, setSelectingAppForStore] = useState<Application | null>(null);
@@ -448,33 +469,45 @@ export default function OverviewDashboard({
   const allocatedCount = allocatedApplications.length;
   const printedAllocationLettersCount = allocatedApplications.filter(a => a.allocationLetterPrinted).length;
 
-  // Filter application list with null-safe property checks
-  const filteredApplications = applications.filter(app => {
-    const fn = (app.firstName || "").toLowerCase();
-    const sn = (app.surname || "").toLowerCase();
-    const gc = (app.ghanaCardNumber || "").toLowerCase();
-    const phone = (app.contactNumber || "").toLowerCase();
-    const ac = (app.assetCode || "").toLowerCase();
-    const appId = (app.id || "").toLowerCase();
-    const sub = (app.subType || "").toLowerCase();
-    const addr = (app.address || "").toLowerCase();
+  // Filter application list with null-safe property checks. Memoized: this
+  // list can run into the thousands, and without memoization it re-filtered
+  // on every render — including every keystroke in any OTHER search box on
+  // the page, since they all live in this same component and any state
+  // change re-renders the whole thing.
+  const filteredApplications = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
+    return applications.filter(app => {
+      const matchesSearch = !term ||
+        (app.firstName || "").toLowerCase().includes(term) ||
+        (app.surname || "").toLowerCase().includes(term) ||
+        (app.ghanaCardNumber || "").toLowerCase().includes(term) ||
+        (app.contactNumber || "").toLowerCase().includes(term) ||
+        (app.assetCode || "").toLowerCase().includes(term) ||
+        (app.id || "").toLowerCase().includes(term) ||
+        (app.subType || "").toLowerCase().includes(term) ||
+        (app.address || "").toLowerCase().includes(term);
 
-    const matchesSearch = !term ||
-      fn.includes(term) ||
-      sn.includes(term) ||
-      gc.includes(term) ||
-      phone.includes(term) ||
-      ac.includes(term) ||
-      appId.includes(term) ||
-      sub.includes(term) ||
-      addr.includes(term);
+      const matchesCategory = selectedCategoryFilter === "all" || app.categoryId === selectedCategoryFilter;
+      const matchesStatus = selectedStatusFilter === "all" || app.status === selectedStatusFilter;
 
-    const matchesCategory = selectedCategoryFilter === "all" || app.categoryId === selectedCategoryFilter;
-    const matchesStatus = selectedStatusFilter === "all" || app.status === selectedStatusFilter;
+      return matchesSearch && matchesCategory && matchesStatus;
+    });
+  }, [applications, searchTerm, selectedCategoryFilter, selectedStatusFilter]);
 
-    return matchesSearch && matchesCategory && matchesStatus;
-  });
+  // Was previously duplicated verbatim twice in the JSX below (once to
+  // check .length > 0, once to actually render) — memoized and computed
+  // once here instead.
+  const filteredSmsLogs = useMemo(() => {
+    return smsLogs.filter(log => {
+      const matchesSearch =
+        log.to.includes(smsSearch) ||
+        log.message.toLowerCase().includes(smsSearch.toLowerCase());
+      const matchesStatus =
+        smsStatusFilter === "all" ||
+        log.status === smsStatusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [smsLogs, smsSearch, smsStatusFilter]);
 
   const getStatusStyle = (status: ApplicationStatus) => {
     switch (status) {
@@ -1463,12 +1496,16 @@ export default function OverviewDashboard({
               <div>
                 <span className="text-[10px] text-slate-400 font-bold uppercase block tracking-wider">Delivery Success Rate</span>
                 <strong className="text-2xl font-extrabold text-slate-800">
-                  {smsLogs.length > 0 
+                  {/* Was hardcoded to "100%" when zero messages had ever
+                      been sent, falsely implying perfect delivery. */}
+                  {smsLogs.length > 0
                     ? `${Math.round((smsLogs.filter(l => l.status === "SUCCESS").length / smsLogs.length) * 100)}%`
-                    : "100%"}
+                    : "—"}
                 </strong>
                 <span className="text-[10px] text-emerald-600 block font-semibold mt-0.5">
-                  {smsLogs.filter(l => l.status === "SUCCESS").length} of {smsLogs.length} ok
+                  {smsLogs.length > 0
+                    ? `${smsLogs.filter(l => l.status === "SUCCESS").length} of ${smsLogs.length} ok`
+                    : "No messages sent yet"}
                 </span>
               </div>
             </div>
@@ -1566,27 +1603,8 @@ export default function OverviewDashboard({
 
               {/* Logs Scroll List */}
               <div className="flex-1 overflow-y-auto space-y-3 pr-1 min-h-0">
-                {smsLogs
-                  .filter(log => {
-                    const matchesSearch = 
-                      log.to.includes(smsSearch) || 
-                      log.message.toLowerCase().includes(smsSearch.toLowerCase());
-                    const matchesStatus = 
-                      smsStatusFilter === "all" || 
-                      log.status === smsStatusFilter;
-                    return matchesSearch && matchesStatus;
-                  })
-                  .length > 0 ? (
-                    smsLogs
-                      .filter(log => {
-                        const matchesSearch = 
-                          log.to.includes(smsSearch) || 
-                          log.message.toLowerCase().includes(smsSearch.toLowerCase());
-                        const matchesStatus = 
-                          smsStatusFilter === "all" || 
-                          log.status === smsStatusFilter;
-                        return matchesSearch && matchesStatus;
-                      })
+                {filteredSmsLogs.length > 0 ? (
+                    filteredSmsLogs
                       .map((log) => (
                         <div
                           key={log.id}
@@ -1957,13 +1975,7 @@ export default function OverviewDashboard({
                   <button
                     type="button"
                     onClick={() => handleOpenBulkPrintBills()}
-                    disabled={activeTenants.filter(app => {
-                      const term = billingSearch.toLowerCase();
-                      const name = `${app.firstName} ${app.surname}`.toLowerCase();
-                      const code = (app.assetCode || "").toLowerCase();
-                      const subType = (app.subType || "").toLowerCase();
-                      return name.includes(term) || code.includes(term) || subType.includes(term);
-                    }).length === 0}
+                    disabled={billingFilteredTenants.length === 0}
                     className="px-3 py-1.5 bg-indigo-900 hover:bg-indigo-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 shrink-0 shadow-sm"
                     title="Print all bills in the list"
                     id="print-all-bills-btn"
@@ -1975,20 +1987,8 @@ export default function OverviewDashboard({
               </div>
 
               <div className="flex-1 overflow-y-auto min-h-0 pt-2 divide-y divide-slate-100 scrollbar-none">
-                {activeTenants.filter(app => {
-                  const term = billingSearch.toLowerCase();
-                  const name = `${app.firstName} ${app.surname}`.toLowerCase();
-                  const code = (app.assetCode || "").toLowerCase();
-                  const subType = (app.subType || "").toLowerCase();
-                  return name.includes(term) || code.includes(term) || subType.includes(term);
-                }).length > 0 ? (
-                  activeTenants.filter(app => {
-                    const term = billingSearch.toLowerCase();
-                    const name = `${app.firstName} ${app.surname}`.toLowerCase();
-                    const code = (app.assetCode || "").toLowerCase();
-                    const subType = (app.subType || "").toLowerCase();
-                    return name.includes(term) || code.includes(term) || subType.includes(term);
-                  }).map((app) => {
+                {billingFilteredTenants.length > 0 ? (
+                  billingFilteredTenants.map((app) => {
                     const monthlyRate = app.subType ? getCentralRentRate(app.subType, rentRates) : 150;
                     const annualRate = monthlyRate * 12;
                     return (
@@ -2492,15 +2492,7 @@ export default function OverviewDashboard({
               <div>
                 <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Bulk Rent Bill Demand Notice Printer</h3>
                 <p className="text-[10px] text-slate-400 mt-0.5">
-                  Ready to print {
-                    activeTenants.filter(app => {
-                      const term = billingSearch.toLowerCase();
-                      const name = `${app.firstName} ${app.surname}`.toLowerCase();
-                      const code = (app.assetCode || "").toLowerCase();
-                      const subType = (app.subType || "").toLowerCase();
-                      return name.includes(term) || code.includes(term) || subType.includes(term);
-                    }).length
-                  } demand notices in a single continuous batch.
+                  Ready to print {billingFilteredTenants.length} demand notices in a single continuous batch.
                 </p>
               </div>
               <div className="flex gap-1.5">
@@ -2594,13 +2586,7 @@ export default function OverviewDashboard({
               id="printable-rent-bills-container" 
               className="space-y-8 max-h-[70vh] overflow-y-auto p-4 bg-slate-50/50 rounded-2xl print:max-h-none print:overflow-visible print:bg-white print:p-0 print:space-y-0"
             >
-              {activeTenants.filter(app => {
-                const term = billingSearch.toLowerCase();
-                const name = `${app.firstName} ${app.surname}`.toLowerCase();
-                const code = (app.assetCode || "").toLowerCase();
-                const subType = (app.subType || "").toLowerCase();
-                return name.includes(term) || code.includes(term) || subType.includes(term);
-              }).map((app, index, arr) => {
+              {billingFilteredTenants.map((app, index, arr) => {
                 const monthlyRate = app.subType ? getCentralRentRate(app.subType, rentRates) : 150;
                 const annualRate = monthlyRate * 12;
                 return (

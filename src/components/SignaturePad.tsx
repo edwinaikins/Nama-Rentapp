@@ -23,6 +23,14 @@ export default function SignaturePad({
   const [signatureImg, setSignatureImg] = useState<string | null>(initialValue);
   const [isDrawMode, setIsDrawMode] = useState(!initialValue);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // Mirrors signatureImg without forcing the resize effect below to
+  // re-subscribe on every stroke — read via .current inside the resize
+  // handler so it always sees the latest saved signature, not whatever it
+  // was when the listener was first attached.
+  const signatureImgRef = useRef<string | null>(initialValue);
+  useEffect(() => {
+    signatureImgRef.current = signatureImg;
+  }, [signatureImg]);
 
   // Set up canvas sizes and handle high DPI displays
   useEffect(() => {
@@ -52,8 +60,21 @@ export default function SignaturePad({
       ctx.lineWidth = 2.5;
       ctx.strokeStyle = "#0f172a"; // deep slate-900 / dark color
 
-      // If we already have a signature loaded, draw it back or keep it
-      setHasSignature(false);
+      // Resizing a <canvas> clears its backing bitmap — that's a browser
+      // platform behavior, not something we can opt out of. If a signature
+      // was already drawn/saved in this session, redraw it onto the fresh
+      // canvas now, so a window resize/rotation doesn't show "not signed"
+      // while a saved signature is still attached to the form underneath.
+      if (signatureImgRef.current) {
+        const img = new Image();
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, width, height);
+        };
+        img.src = signatureImgRef.current;
+        setHasSignature(true);
+      } else {
+        setHasSignature(false);
+      }
     };
 
     resizeCanvas();
