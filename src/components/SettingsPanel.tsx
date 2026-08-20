@@ -1,16 +1,18 @@
 import React, { useState } from "react";
 import { Category, AttributeDefinition, PortalUser, UserRole, Setting, SmsTemplatesSetting, AllocationLetterSetting, RentRatesSetting, RentBillTemplateSetting, GlobalSignatureSetting } from "../types";
-import { Plus, Trash2, ShieldAlert, Sparkles, HelpCircle, Save, CheckCircle2, ChevronRight, Settings, Info, Edit, AlertCircle, ShieldCheck, User, FileText, Smartphone, Printer, Upload, PenTool } from "lucide-react";
+import { Plus, Trash2, ShieldAlert, Sparkles, HelpCircle, Save, CheckCircle2, ChevronRight, Settings, Info, Edit, AlertCircle, ShieldCheck, User, FileText, Smartphone, Printer, Upload, PenTool, Database } from "lucide-react";
 import { doc, setDoc, deleteDoc } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { DEFAULT_SMS_TEMPLATES, DEFAULT_ALLOCATION_LETTER_TEMPLATE, DEFAULT_RENT_BILL_TEMPLATE, DEFAULT_AGREEMENT_TEMPLATE, DEFAULT_GLOBAL_SIGNATURE } from "../data";
 import { useGlobalLogoUrl } from "../utils/logoState";
 import MunicipalLogo from "./MunicipalLogo";
 import SignaturePad from "./SignaturePad";
+import ApplicationMediaMigrationPanel from "./ApplicationMediaMigrationPanel";
 
 interface SettingsPanelProps {
   categories: Category[];
   users: PortalUser[];
+  currentUser?: PortalUser | null;
   onUpdate: () => void;
   onClose: () => void;
   agreementTemplate?: Setting | null;
@@ -21,8 +23,8 @@ interface SettingsPanelProps {
   globalSignature?: GlobalSignatureSetting | null;
 }
 
-export default function SettingsPanel({ categories, users, onUpdate, onClose, agreementTemplate, smsTemplates, allocationLetterTemplate, rentRates, rentBillTemplate, globalSignature }: SettingsPanelProps) {
-  const [activeTab, setActiveTab] = useState<"LIST" | "CREATE" | "EDIT" | "USERS" | "AGREEMENT" | "SMS" | "ALLOCATION" | "RENT_RATES" | "BILL_TEMPLATE" | "GLOBAL_SIGNATURE">("LIST");
+export default function SettingsPanel({ categories, users, currentUser, onUpdate, onClose, agreementTemplate, smsTemplates, allocationLetterTemplate, rentRates, rentBillTemplate, globalSignature }: SettingsPanelProps) {
+  const [activeTab, setActiveTab] = useState<"LIST" | "CREATE" | "EDIT" | "USERS" | "AGREEMENT" | "SMS" | "ALLOCATION" | "RENT_RATES" | "BILL_TEMPLATE" | "GLOBAL_SIGNATURE" | "DATA_MIGRATION">("LIST");
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
 
   // Global Signature & Signee states
@@ -834,6 +836,20 @@ export default function SettingsPanel({ categories, users, onUpdate, onClose, ag
         >
           <PenTool className="w-3.5 h-3.5 text-amber-500" /> Global Authorized Signatory
         </button>
+        {currentUser?.role === "SUPER_USER" && (
+          <button
+            type="button"
+            onClick={() => setActiveTab("DATA_MIGRATION")}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+              activeTab === "DATA_MIGRATION"
+                ? "bg-indigo-900 text-white shadow-sm"
+                : "text-slate-600 hover:bg-slate-200/50"
+            }`}
+            id="data-migration-tab-btn"
+          >
+            <Database className="w-3.5 h-3.5 text-rose-500" /> Media Storage Migration
+          </button>
+        )}
       </div>
 
       {/* Content area */}
@@ -2250,6 +2266,10 @@ export default function SettingsPanel({ categories, users, onUpdate, onClose, ag
               </button>
             </div>
           </form>
+        )}
+
+        {activeTab === "DATA_MIGRATION" && currentUser?.role === "SUPER_USER" && (
+          <ApplicationMediaMigrationPanel />
         )}
 
       </div>

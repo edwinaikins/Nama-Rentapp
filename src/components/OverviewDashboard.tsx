@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { doc, updateDoc, writeBatch, deleteDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc, writeBatch, deleteDoc } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { Application, Category, ApplicationStatus, PortalUser, Asset, SmsLog, RentRatesSetting, RentBillTemplateSetting, GlobalSignatureSetting } from "../types";
 import { getCentralRentRate } from "../utils/rentUtils";
@@ -91,6 +91,12 @@ export default function OverviewDashboard({
   const [bulkAllocationSearch, setBulkAllocationSearch] = useState("");
   const [bulkAllocationCategoryFilter, setBulkAllocationCategoryFilter] = useState("all");
   const [bulkAllocationStatusFilter, setBulkAllocationStatusFilter] = useState("all");
+  // Applicant photos for the bulk allocation-letter print run, keyed by
+  // application id. Photos live in application_media/{id} now (not on the
+  // applications doc — see types.ts), so they're batch-fetched on demand
+  // only when this print modal actually opens, rather than being carried
+  // on every application record the always-on dashboard listener downloads.
+  const [bulkPrintPhotos, setBulkPrintPhotos] = useState<Record<string, string>>({});
 
   // SMS Tracking and Testing Panel States
   const [smsSearch, setSmsSearch] = useState("");
@@ -468,6 +474,38 @@ export default function OverviewDashboard({
   const allocatedApplications = applications.filter(a => a.status === "RESERVED" || a.status === "AWAITING_PAYMENT" || a.status === "OCCUPIED" || !!a.assetCode);
   const allocatedCount = allocatedApplications.length;
   const printedAllocationLettersCount = allocatedApplications.filter(a => a.allocationLetterPrinted).length;
+
+  // Batch-fetch applicant photos for the bulk allocation-letter print run
+  // only when the print modal is actually opened — a one-time read per
+  // allocated applicant, not a standing subscription. Ignores the modal's
+  // own search/category/status filters deliberately, so photos stay
+  // available even if the staff member narrows the filter after opening.
+  useEffect(() => {
+    if (!printAllAllocationLetters) return;
+    let cancelled = false;
+    const idsNeeded = allocatedApplications.map(a => a.id).filter(id => !(id in bulkPrintPhotos));
+    if (idsNeeded.length === 0) return;
+    Promise.all(
+      idsNeeded.map(async (id) => {
+        try {
+          const snap = await getDoc(doc(db, "application_media", id));
+          return [id, snap.exists() ? (snap.data().photo || "") : ""] as const;
+        } catch (error) {
+          console.warn(`Failed to fetch application_media/${id} for bulk print:`, error);
+          return [id, ""] as const;
+        }
+      })
+    ).then((entries) => {
+      if (cancelled) return;
+      setBulkPrintPhotos(prev => {
+        const next = { ...prev };
+        entries.forEach(([id, photo]) => { next[id] = photo; });
+        return next;
+      });
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [printAllAllocationLetters, allocatedApplications.map(a => a.id).join(",")]);
 
   // Filter application list with null-safe property checks. Memoized: this
   // list can run into the thousands, and without memoization it re-filtered
@@ -1335,20 +1373,17 @@ export default function OverviewDashboard({
                       onClick={() => onSelectApplication(app)}
                       className="bg-white rounded-3xl border border-slate-150 p-4 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer flex gap-4 text-left group"
                     >
-                      {/* Avatar thumbnail */}
+                      {/* Avatar thumbnail — deliberately a static placeholder,
+                          not a per-row photo fetch. The applicant photo now
+                          lives in application_media/{id} (see types.ts), and
+                          fetching it for every row in this list would
+                          reintroduce the exact N-way read cost that moving
+                          it out of the applications doc was meant to avoid.
+                          The real photo is one click away in the detail view. */}
                       <div className="w-16 h-16 rounded-2xl overflow-hidden bg-slate-100 shrink-0 border border-slate-200 relative shadow-inner">
-                        {app.photo ? (
-                          <img
-                            src={app.photo}
-                            referrerPolicy="no-referrer"
-                            alt="Thumbnail"
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-slate-350">
-                            <User className="w-6 h-6" />
-                          </div>
-                        )}
+                        <div className="w-full h-full flex items-center justify-center text-slate-350">
+                          <User className="w-6 h-6" />
+                        </div>
                         <span className="absolute bottom-0 left-0 right-0 bg-black/50 text-[8px] text-center text-white py-0.5 leading-none">
                           {app.id}
                         </span>
@@ -3175,10 +3210,10 @@ export default function OverviewDashboard({
                           </div>
 
                           {/* Applicant Photo Stamp */}
-                          {app.photo ? (
+                          {bulkPrintPhotos[app.id] ? (
                             <div className="border-2 border-slate-200 rounded-lg p-1 shrink-0 bg-slate-50 shadow-sm print:border print:shadow-none">
                               <img
-                                src={app.photo}
+                                src={bulkPrintPhotos[app.id]}
                                 alt="Applicant Passport"
                                 className="w-16 h-20 object-cover rounded"
                                 referrerPolicy="no-referrer"

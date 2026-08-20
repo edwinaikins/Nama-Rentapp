@@ -499,7 +499,6 @@ export default function App() {
         contactNumber,
         address: rawData.address || rawData.residentialAddress || "Nsawam",
         ghanaCardNumber,
-        photo: rawData.photo || rawData.photoUrl || rawData.imageUrl || "",
         categoryId: catId,
         subType,
         attributes: attributesObj,
@@ -1345,6 +1344,7 @@ export default function App() {
               <SettingsPanel
                 categories={categories}
                 users={users}
+                currentUser={currentUser}
                 onUpdate={() => {}}
                 onClose={() => setCurrentView("DASHBOARD")}
                 agreementTemplate={agreementTemplate}

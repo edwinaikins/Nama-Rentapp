@@ -57,7 +57,6 @@ export interface Application {
   contactNumber: string;
   address: string;
   ghanaCardNumber: string; // GHA-XXXXXXXXX-X
-  photo?: string; // Base64 passport photo string
   attributes: Record<string, any>; // Key-Value pair dynamic attributes (EAV mapping)
   status: ApplicationStatus;
   
@@ -76,8 +75,6 @@ export interface Application {
   allocationLetterIssuedAt?: string;
   allocationLetterPrinted?: boolean;
   allocationLetterPrintedAt?: string;
-  allocationSignatureImg?: string; // Base64 signature for Allocation Letter
-  leaseSignatureImg?: string; // Base64 signature for Lease Agreement
   signAllocationManually?: boolean;
   signLeaseManually?: boolean;
   
@@ -92,16 +89,32 @@ export interface Application {
   currentLeaseYear?: number; // e.g. 1 for first year, 2 for second year renewal
   payments?: PaymentRecord[]; // List of logged installments
   assignedAssets?: string[]; // Array of assigned asset codes
-  scannedAgreementUrl?: string; // Base64 data url of the signed agreement
-  scannedAgreementUploadedAt?: string; // ISO date string of upload
-  scannedAllocationLetterUrl?: string; // Base64 data url of the scanned allocation letter
-  scannedAllocationLetterUploadedAt?: string; // ISO date string of upload of allocation letter
   rentBillNo?: string;
   rentBillDate?: string;
   rentBillDueDate?: string;
   signBillManually?: boolean;
 
   createdAt: string;
+  updatedAt: string;
+}
+
+// Heavy base64 image/document blobs for an Application, split out into
+// their own collection (application_media/{applicationId}, same ID as the
+// Application it belongs to) so the always-on realtime dashboard listeners
+// on the `applications` collection (and its legacy siblings) never have to
+// download this data — Firestore listeners always send full documents, so
+// keeping multi-hundred-KB images inline on a frequently-synced document
+// was the direct cause of multi-minute dashboard load times across ~600
+// records. This doc is only ever fetched on demand (opening a single
+// application's detail view, or an explicit bulk-print action), never via
+// a standing listener across the whole collection.
+export interface ApplicationMedia {
+  photo?: string; // Base64 passport photo string
+  leaseSignatureImg?: string; // Base64 signature for Lease Agreement
+  scannedAgreementUrl?: string; // Base64 data url of the signed agreement
+  scannedAgreementUploadedAt?: string; // ISO date string of upload
+  scannedAllocationLetterUrl?: string; // Base64 data url of the scanned allocation letter
+  scannedAllocationLetterUploadedAt?: string; // ISO date string of upload of allocation letter
   updatedAt: string;
 }
 

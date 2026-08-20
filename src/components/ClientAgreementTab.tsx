@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Application, PortalUser, GlobalSignatureSetting } from "../types";
+import { Application, ApplicationMedia, PortalUser, GlobalSignatureSetting } from "../types";
 import { FileText, Printer, Eye, Trash2, Upload, Lock, ShieldAlert, PenTool, ArrowRight, Calendar, AlertCircle } from "lucide-react";
 import SignaturePad from "./SignaturePad";
 import { doc, updateDoc } from "firebase/firestore";
@@ -8,6 +8,7 @@ import { db } from "../firebase";
 interface ClientAgreementTabProps {
   application: Application;
   currentUser: PortalUser | null;
+  media: ApplicationMedia | null;
   leaseDuration: string;
   setLeaseDuration: (val: string) => void;
   baseRent: number;
@@ -38,6 +39,7 @@ interface ClientAgreementTabProps {
 export default function ClientAgreementTab({
   application,
   currentUser,
+  media,
   leaseDuration,
   setLeaseDuration,
   baseRent,
@@ -179,7 +181,7 @@ export default function ClientAgreementTab({
 
               <div className="space-y-1.5 font-sans text-left">
                 <span className="text-[10px] text-slate-400 block font-bold uppercase">Scanned Signed Copy</span>
-                {application.scannedAgreementUrl ? (
+                {media?.scannedAgreementUrl ? (
                   <div className="flex items-center gap-2">
                     <button
                       type="button"

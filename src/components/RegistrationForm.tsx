@@ -227,8 +227,21 @@ export default function RegistrationForm({ categories, onSuccess, onCancel, smsT
     if (!pendingApplication) return;
     setIsSaving(true);
     try {
-      await setDoc(doc(db, "applications", pendingApplication.id), pendingApplication);
-      
+      // The passport photo is a base64 blob and does NOT belong on the
+      // applications doc itself — that doc is downloaded in full by every
+      // realtime dashboard listener, so embedding images there is what
+      // caused multi-minute dashboard load times. Write it separately to
+      // application_media/{id}, fetched only on demand.
+      const { photo, ...applicationWithoutPhoto } = pendingApplication;
+      await setDoc(doc(db, "applications", pendingApplication.id), applicationWithoutPhoto);
+      if (photo) {
+        await setDoc(
+          doc(db, "application_media", pendingApplication.id),
+          { photo, updatedAt: new Date().toISOString() },
+          { merge: true }
+        );
+      }
+
       // Asynchronously trigger Wigal SMS notification to the client upon successful registration
       try {
         const template = smsTemplates?.registration || DEFAULT_SMS_TEMPLATES.registration;

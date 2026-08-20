@@ -1,13 +1,16 @@
 import React, { useState } from "react";
-import { Application, Category, PortalUser } from "../types";
+import { Application, ApplicationMedia, Category, PortalUser } from "../types";
 import { User, Building, PenTool, Check, X, Camera, Image, AlertCircle, Save } from "lucide-react";
 import { doc, updateDoc } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../firebase";
+import { saveApplicationMedia, clearApplicationMediaFields } from "../utils/applicationMedia";
 
 interface ClientBioTabProps {
   application: Application;
   category: Category | undefined;
   currentUser: PortalUser | null;
+  media: ApplicationMedia | null;
+  onMediaChange: (patch: Partial<ApplicationMedia>) => void;
   onUpdate: () => void;
 }
 
@@ -26,7 +29,7 @@ const SIMULATED_PORTRAITS = [
   }
 ];
 
-export default function ClientBioTab({ application, category, currentUser, onUpdate }: ClientBioTabProps) {
+export default function ClientBioTab({ application, category, currentUser, media, onMediaChange, onUpdate }: ClientBioTabProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +54,7 @@ export default function ClientBioTab({ application, category, currentUser, onUpd
     setEditAddress(application.address || "");
     setEditSubType(application.subType || "");
     setEditAttributes(application.attributes || {});
-    setEditPhoto(application.photo || "");
+    setEditPhoto(media?.photo || "");
     setError(null);
     setIsEditing(true);
   };
@@ -118,7 +121,7 @@ export default function ClientBioTab({ application, category, currentUser, onUpd
 
     try {
       const appDocRef = doc(db, "applications", application.id);
-      
+
       const payload: Partial<Application> = {
         firstName: editFirstName.trim(),
         surname: editSurname.trim(),
@@ -128,11 +131,23 @@ export default function ClientBioTab({ application, category, currentUser, onUpd
         address: editAddress.trim(),
         subType: editSubType,
         attributes: editAttributes,
-        photo: editPhoto || undefined,
         updatedAt: new Date().toISOString()
       };
 
       await updateDoc(appDocRef, payload);
+
+      // The portrait photo lives in application_media, not on the
+      // applications doc itself — see ApplicationMedia in types.ts.
+      if (editPhoto !== (media?.photo || "")) {
+        if (editPhoto) {
+          await saveApplicationMedia(application.id, { photo: editPhoto });
+          onMediaChange({ photo: editPhoto });
+        } else {
+          await clearApplicationMediaFields(application.id, ["photo"]);
+          onMediaChange({ photo: undefined });
+        }
+      }
+
       setIsSaving(false);
       setIsEditing(false);
       onUpdate();
@@ -216,9 +231,9 @@ export default function ClientBioTab({ application, category, currentUser, onUpd
           {/* Portrait Photo log */}
           <div className="bg-white border border-slate-200/80 p-4 rounded-2xl shadow-sm flex flex-col items-center">
             <div className="aspect-square w-full rounded-2xl overflow-hidden bg-slate-50 border border-slate-200 shadow-inner relative group max-w-[240px] mx-auto">
-              {editPhoto || (!isEditing && application.photo) ? (
+              {editPhoto || (!isEditing && media?.photo) ? (
                 <img
-                  src={isEditing ? editPhoto : application.photo}
+                  src={isEditing ? editPhoto : media?.photo}
                   referrerPolicy="no-referrer"
                   alt="Applicant Portrait"
                   className="w-full h-full object-cover"

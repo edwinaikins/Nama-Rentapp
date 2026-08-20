@@ -1,12 +1,13 @@
 import React, { useState } from "react";
-import { Application, PortalUser, Category, AllocationLetterSetting, GlobalSignatureSetting } from "../types";
-import { 
-  FileText, Printer, CheckCircle2, AlertCircle, 
+import { Application, ApplicationMedia, PortalUser, Category, AllocationLetterSetting, GlobalSignatureSetting } from "../types";
+import {
+  FileText, Printer, CheckCircle2, AlertCircle,
   Lock, ShieldAlert, ArrowRight, Calendar, User, Building, MapPin, Save,
   Upload, Trash2, Eye, PenTool
 } from "lucide-react";
 import { doc, updateDoc } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../firebase";
+import { saveApplicationMedia, clearApplicationMediaFields } from "../utils/applicationMedia";
 import SignaturePad from "./SignaturePad";
 
 interface ClientAllocationLetterTabProps {
@@ -14,6 +15,8 @@ interface ClientAllocationLetterTabProps {
   category: Category | null;
   assignedAssetsList: any[];
   currentUser: PortalUser | null;
+  media: ApplicationMedia | null;
+  onMediaChange: (patch: Partial<ApplicationMedia>) => void;
   isUpdating: boolean;
   onUpdate: () => void;
   setShowAllocationLetterModal: (val: boolean) => void;
@@ -33,6 +36,8 @@ export default function ClientAllocationLetterTab({
   category,
   assignedAssetsList,
   currentUser,
+  media,
+  onMediaChange,
   isUpdating,
   onUpdate,
   setShowAllocationLetterModal,
@@ -167,11 +172,14 @@ export default function ClientAllocationLetterTab({
     reader.onloadend = async () => {
       try {
         const base64 = reader.result as string;
-        const appDocRef = doc(db, "applications", application.id);
-        await updateDoc(appDocRef, {
+        const uploadedAt = new Date().toISOString();
+        await saveApplicationMedia(application.id, {
           scannedAllocationLetterUrl: base64,
-          scannedAllocationLetterUploadedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
+          scannedAllocationLetterUploadedAt: uploadedAt
+        });
+        onMediaChange({
+          scannedAllocationLetterUrl: base64,
+          scannedAllocationLetterUploadedAt: uploadedAt
         });
         setScannedLetterUploading(false);
         onUpdate();
@@ -194,12 +202,11 @@ export default function ClientAllocationLetterTab({
     if (!window.confirm("Are you sure you want to remove the uploaded scanned allocation letter?")) return;
     setLocalSaving(true);
     try {
-      const appDocRef = doc(db, "applications", application.id);
-      await updateDoc(appDocRef, {
-        scannedAllocationLetterUrl: null,
-        scannedAllocationLetterUploadedAt: null,
-        updatedAt: new Date().toISOString()
-      });
+      await clearApplicationMediaFields(application.id, [
+        "scannedAllocationLetterUrl",
+        "scannedAllocationLetterUploadedAt"
+      ]);
+      onMediaChange({ scannedAllocationLetterUrl: undefined, scannedAllocationLetterUploadedAt: undefined });
       setLocalSaving(false);
       onUpdate();
     } catch (err) {
@@ -381,7 +388,7 @@ export default function ClientAllocationLetterTab({
 
           <div className="space-y-1.5 font-sans text-left">
             <span className="text-[10px] text-slate-400 block font-bold uppercase">Status</span>
-            {application.scannedAllocationLetterUrl ? (
+            {media?.scannedAllocationLetterUrl ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-1.5 text-xs text-emerald-700 font-semibold bg-emerald-50 border border-emerald-100 p-2 rounded-xl">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
@@ -407,9 +414,9 @@ export default function ClientAllocationLetterTab({
                     </button>
                   )}
                 </div>
-                {application.scannedAllocationLetterUploadedAt && (
+                {media?.scannedAllocationLetterUploadedAt && (
                   <span className="text-[9px] text-slate-400 block font-mono">
-                    Uploaded on: {new Date(application.scannedAllocationLetterUploadedAt).toLocaleString("en-GB")}
+                    Uploaded on: {new Date(media.scannedAllocationLetterUploadedAt).toLocaleString("en-GB")}
                   </span>
                 )}
               </div>
@@ -536,10 +543,10 @@ export default function ClientAllocationLetterTab({
               </div>
 
               {/* Applicant Photo Stamp if exists */}
-              {application.photo ? (
+              {media?.photo ? (
                 <div className="border-2 border-slate-200 rounded-lg p-1 shrink-0 bg-slate-50 shadow-sm print:border print:shadow-none">
                   <img
-                    src={application.photo}
+                    src={media.photo}
                     alt="Applicant Passport"
                     className="w-16 h-20 object-cover rounded"
                     referrerPolicy="no-referrer"
@@ -638,17 +645,17 @@ export default function ClientAllocationLetterTab({
       </div>
 
       {/* Scanned Allocation Letter Viewer Modal */}
-      {showScannedLetterModal && application.scannedAllocationLetterUrl && (
+      {showScannedLetterModal && media?.scannedAllocationLetterUrl && (
         <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto" id="scanned-letter-viewer-modal">
           <div className="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-100 space-y-4 text-left">
             <div className="flex justify-between items-center pb-2 border-b border-slate-100">
               <div>
                 <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Scanned Copy of Allocation Letter</h3>
-                <p className="text-[9px] text-slate-400">Uploaded on {application.scannedAllocationLetterUploadedAt ? new Date(application.scannedAllocationLetterUploadedAt).toLocaleString() : "N/A"}</p>
+                <p className="text-[9px] text-slate-400">Uploaded on {media.scannedAllocationLetterUploadedAt ? new Date(media.scannedAllocationLetterUploadedAt).toLocaleString() : "N/A"}</p>
               </div>
               <div className="flex gap-1.5">
                 <a
-                  href={application.scannedAllocationLetterUrl}
+                  href={media.scannedAllocationLetterUrl}
                   download={`scanned-allocation-letter-${application.firstName.toLowerCase()}-${application.surname.toLowerCase()}.jpg`}
                   className="px-3 py-1.5 bg-indigo-900 hover:bg-indigo-800 text-white font-bold text-xs rounded-lg active:scale-95 transition-all shadow-sm"
                 >
@@ -665,15 +672,15 @@ export default function ClientAllocationLetterTab({
             </div>
 
             <div className="border border-slate-150 rounded-2xl overflow-hidden bg-slate-50 max-h-[75vh] flex items-center justify-center p-2">
-              {application.scannedAllocationLetterUrl.startsWith("data:application/pdf") ? (
+              {media.scannedAllocationLetterUrl.startsWith("data:application/pdf") ? (
                 <iframe
-                  src={application.scannedAllocationLetterUrl}
+                  src={media.scannedAllocationLetterUrl}
                   className="w-full h-[60vh] rounded-xl border border-slate-200"
                   title="PDF Document Viewer"
                 />
               ) : (
                 <img
-                  src={application.scannedAllocationLetterUrl}
+                  src={media.scannedAllocationLetterUrl}
                   referrerPolicy="no-referrer"
                   alt="Scanned Allocation Letter copy"
                   className="max-w-full max-h-[60vh] object-contain rounded-xl shadow-sm border border-white"

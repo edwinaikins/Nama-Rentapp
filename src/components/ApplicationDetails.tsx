@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Application, Category, ApplicationStatus, Asset, PortalUser, Setting, SmsTemplatesSetting, AllocationLetterSetting, RentRatesSetting, GlobalSignatureSetting } from "../types";
-import { 
-  Building, CheckCircle2, ShieldCheck, CreditCard, 
-  User, MapPin, Calendar, DollarSign, PenTool, 
+import { Application, ApplicationMedia, Category, ApplicationStatus, Asset, PortalUser, Setting, SmsTemplatesSetting, AllocationLetterSetting, RentRatesSetting, GlobalSignatureSetting } from "../types";
+import {
+  Building, CheckCircle2, ShieldCheck, CreditCard,
+  User, MapPin, Calendar, DollarSign, PenTool,
   Trash2, FileText, Smartphone, ArrowRight, Printer, AlertCircle,
   Upload, Paperclip, Eye, ShieldAlert, Lock
 } from "lucide-react";
@@ -10,6 +10,8 @@ import { doc, updateDoc, deleteDoc, runTransaction, arrayUnion } from "firebase/
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { sendSMSAndLog, formatAllocationSms, formatPaymentSms } from "../services/smsService";
 import { DEFAULT_SMS_TEMPLATES, DEFAULT_ALLOCATION_LETTER_TEMPLATE } from "../data";
+import { useApplicationMedia } from "../hooks/useApplicationMedia";
+import { saveApplicationMedia, clearApplicationMediaFields } from "../utils/applicationMedia";
 import ClientBioTab from "./ClientBioTab";
 import ClientAssetsTab from "./ClientAssetsTab";
 import ClientAllocationLetterTab from "./ClientAllocationLetterTab";
@@ -49,6 +51,15 @@ export default function ApplicationDetails({
   rentBillTemplate
 }: ApplicationDetailsProps) {
   const [activeDetailsTab, setActiveDetailsTab] = useState<"BIO" | "ASSETS" | "ALLOCATION" | "BILL" | "AGREEMENT" | "PAYMENTS">("BIO");
+
+  // Heavy base64 image/document fields (photo, signatures, scanned copies)
+  // live in application_media/{id} — a separate collection, fetched once
+  // on demand here rather than embedded on the applications doc that every
+  // realtime dashboard listener downloads in full. See ApplicationMedia in
+  // types.ts for why. Fetched once per detail-view open and shared with
+  // every child tab below via props, so opening one application only ever
+  // costs one media read, not one per tab.
+  const { media, setMediaField } = useApplicationMedia(application.id);
 
   // Stage 2 variables (Allocation)
   const [assetCode, setAssetCode] = useState(application.assetCode || "");
@@ -154,18 +165,26 @@ export default function ApplicationDetails({
   const currentStageIndex = getStageIndex(application.status);
 
   // Execute stage changes & update Firestore document
-  const handleUpdateStatus = async (newStatus: ApplicationStatus, payload: Partial<Application>) => {
+  const handleUpdateStatus = async (newStatus: ApplicationStatus, payload: Partial<Application> & { leaseSignatureImg?: string }) => {
     setIsUpdating(true);
     const appDocRef = doc(db, "applications", application.id);
+    // leaseSignatureImg is a base64 blob and doesn't belong on the
+    // applications doc — route it to application_media instead (see
+    // ApplicationMedia in types.ts).
+    const { leaseSignatureImg, ...restPayload } = payload;
     const updatedData = {
-      ...payload,
+      ...restPayload,
       status: newStatus,
       updatedAt: new Date().toISOString()
     };
 
     try {
       await updateDoc(appDocRef, updatedData);
-      
+      if (leaseSignatureImg !== undefined) {
+        await saveApplicationMedia(application.id, { leaseSignatureImg });
+        setMediaField({ leaseSignatureImg });
+      }
+
       // Synchronize all assigned physical assets' statuses to OCCUPIED if moving to active occupancy
       if (newStatus === "OCCUPIED") {
         for (const asset of assignedAssetsList) {
@@ -330,12 +349,12 @@ export default function ApplicationDetails({
     reader.onloadend = async () => {
       try {
         const base64 = reader.result as string;
-        const appDocRef = doc(db, "applications", application.id);
-        await updateDoc(appDocRef, {
+        const uploadedAt = new Date().toISOString();
+        await saveApplicationMedia(application.id, {
           scannedAgreementUrl: base64,
-          scannedAgreementUploadedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
+          scannedAgreementUploadedAt: uploadedAt
         });
+        setMediaField({ scannedAgreementUrl: base64, scannedAgreementUploadedAt: uploadedAt });
         setScannedFileUploading(false);
         onUpdate();
       } catch (err: any) {
@@ -357,12 +376,8 @@ export default function ApplicationDetails({
     if (!window.confirm("Are you sure you want to remove the uploaded scanned lease agreement?")) return;
     setIsUpdating(true);
     try {
-      const appDocRef = doc(db, "applications", application.id);
-      await updateDoc(appDocRef, {
-        scannedAgreementUrl: null,
-        scannedAgreementUploadedAt: null,
-        updatedAt: new Date().toISOString()
-      });
+      await clearApplicationMediaFields(application.id, ["scannedAgreementUrl", "scannedAgreementUploadedAt"]);
+      setMediaField({ scannedAgreementUrl: undefined, scannedAgreementUploadedAt: undefined });
       setIsUpdating(false);
       onUpdate();
     } catch (err) {
@@ -786,7 +801,7 @@ export default function ApplicationDetails({
         >
           <FileText className="w-4 h-4" />
           <span>Lease Agreement</span>
-          {application.scannedAgreementUrl && (
+          {media?.scannedAgreementUrl && (
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 block"></span>
           )}
         </button>
@@ -821,6 +836,8 @@ export default function ApplicationDetails({
           application={application}
           category={category}
           currentUser={currentUser}
+          media={media}
+          onMediaChange={setMediaField}
           onUpdate={onUpdate}
         />
       )}
@@ -849,6 +866,8 @@ export default function ApplicationDetails({
           application={application}
           category={category || null}
           assignedAssetsList={assignedAssetsList}
+          media={media}
+          onMediaChange={setMediaField}
           currentUser={currentUser}
           isUpdating={isUpdating}
           onUpdate={onUpdate}
@@ -876,6 +895,7 @@ export default function ApplicationDetails({
         <ClientAgreementTab
           application={application}
           currentUser={currentUser}
+          media={media}
           leaseDuration={leaseDuration}
           setLeaseDuration={setLeaseDuration}
           baseRent={baseRent}
@@ -1318,10 +1338,10 @@ export default function ApplicationDetails({
                   </div>
 
                   {/* Applicant Photo Stamp if exists */}
-                  {application.photo ? (
+                  {media?.photo ? (
                     <div className="border-2 border-slate-200 rounded-lg p-1 shrink-0 bg-slate-50 shadow-sm print:border print:shadow-none">
                       <img
-                        src={application.photo}
+                        src={media.photo}
                         alt="Applicant Passport"
                         className="w-16 h-20 object-cover rounded"
                         referrerPolicy="no-referrer"
@@ -1524,9 +1544,9 @@ export default function ApplicationDetails({
                   {/* Right Column: Tenant Passport Photo */}
                   <div className="flex flex-col items-center shrink-0">
                     <div className="w-[72px] h-[84px] p-0.5 bg-white border border-slate-300 rounded shadow-sm relative overflow-hidden flex items-center justify-center shrink-0">
-                      {application.photo ? (
+                      {media?.photo ? (
                         <img
-                          src={application.photo}
+                          src={media.photo}
                           referrerPolicy="no-referrer"
                           alt="Tenant Portrait"
                           className="w-full h-full object-cover rounded"
@@ -1699,17 +1719,17 @@ export default function ApplicationDetails({
       })()}
 
       {/* Scanned Agreement Document Viewer Modal */}
-      {showScannedAgreementModal && application.scannedAgreementUrl && (
+      {showScannedAgreementModal && media?.scannedAgreementUrl && (
         <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto" id="scanned-agreement-viewer-modal">
           <div className="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-100 space-y-4 text-left">
             <div className="flex justify-between items-center pb-2 border-b border-slate-100">
               <div>
                 <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Scanned Signed Lease Indenture</h3>
-                <p className="text-[9px] text-slate-400">Uploaded on {application.scannedAgreementUploadedAt ? new Date(application.scannedAgreementUploadedAt).toLocaleString() : "N/A"}</p>
+                <p className="text-[9px] text-slate-400">Uploaded on {media.scannedAgreementUploadedAt ? new Date(media.scannedAgreementUploadedAt).toLocaleString() : "N/A"}</p>
               </div>
               <div className="flex gap-1.5">
                 <a
-                  href={application.scannedAgreementUrl}
+                  href={media.scannedAgreementUrl}
                   download={`signed-lease-agreement-${application.firstName.toLowerCase()}-${application.surname.toLowerCase()}.jpg`}
                   className="px-3 py-1.5 bg-indigo-900 hover:bg-indigo-800 text-white font-bold text-xs rounded-lg active:scale-95 transition-all shadow-sm"
                 >
@@ -1726,15 +1746,15 @@ export default function ApplicationDetails({
             </div>
 
             <div className="border border-slate-150 rounded-2xl overflow-hidden bg-slate-50 max-h-[75vh] flex items-center justify-center p-2">
-              {application.scannedAgreementUrl.startsWith("data:application/pdf") ? (
+              {media.scannedAgreementUrl.startsWith("data:application/pdf") ? (
                 <iframe
-                  src={application.scannedAgreementUrl}
+                  src={media.scannedAgreementUrl}
                   className="w-full h-[60vh] rounded-xl border border-slate-200"
                   title="PDF Document Viewer"
                 />
               ) : (
                 <img
-                  src={application.scannedAgreementUrl}
+                  src={media.scannedAgreementUrl}
                   referrerPolicy="no-referrer"
                   alt="Scanned signed copy"
                   className="max-w-full max-h-[60vh] object-contain rounded-xl shadow-sm border border-white"

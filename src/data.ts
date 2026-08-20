@@ -125,7 +125,6 @@ export const DEFAULT_SEED_APPLICATIONS: Application[] = [
     contactNumber: "0240000000",
     address: "Nsawam Main Market Area",
     ghanaCardNumber: "GHA-720193821-4",
-    photo: "",
     categoryId: "market_stores___shed",
     subType: "Market Store",
     attributes: {
