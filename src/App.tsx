@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Category, Application, ApplicationStatus, Asset, PortalUser, UserRole, Setting, SmsLog, SmsTemplatesSetting, AllocationLetterSetting, RentRatesSetting, RentBillTemplateSetting, GlobalSignatureSetting } from "./types";
 import { DEFAULT_SEED_CATEGORIES, DEFAULT_SEED_ASSETS, DEFAULT_AGREEMENT_TEMPLATE, DEFAULT_SMS_TEMPLATES, DEFAULT_ALLOCATION_LETTER_TEMPLATE, DEFAULT_RENT_RATES, DEFAULT_RENT_BILL_TEMPLATE, DEFAULT_GLOBAL_SIGNATURE, DEFAULT_SEED_APPLICATIONS } from "./data";
 import OverviewDashboard from "./components/OverviewDashboard";
@@ -43,6 +43,19 @@ export default function App() {
   // look up "my own" staff profile in Firestore (see firestore.rules).
   const [authUid, setAuthUid] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Guards against a race between handleEmailSignUp's own explicit profile
+  // write and the "own profile" onSnapshot listener below, which ALSO
+  // self-provisions a profile the first time it sees a signed-in UID with
+  // no existing users/{uid} doc. createUserWithEmailAndPassword() signs the
+  // new account in immediately, which fires onAuthStateChanged and mounts
+  // that listener concurrently with handleEmailSignUp's own setDoc() call.
+  // Whichever write reaches Firestore second gets evaluated as an UPDATE
+  // (the doc now exists) instead of a CREATE, and update requires
+  // isSuperUser() — so the loser fails with "Missing or insufficient
+  // permissions" even though the rules and payload are both correct. This
+  // flag tells the listener to stand down while an explicit signup is in
+  // flight, so only one write for a given account is ever attempted.
+  const skipAutoProvisionRef = useRef(false);
   
   // User Management RBAC state definitions
   const [users, setUsers] = useState<PortalUser[]>([]);
@@ -553,11 +566,26 @@ export default function App() {
       return;
     }
 
+    // onSnapshot can invoke its callback more than once in quick succession
+    // for the same "doc doesn't exist yet" state (e.g. an initial event
+    // plus a follow-up before the first has settled). Without a re-entrancy
+    // guard, two overlapping invocations both see !snap.exists() and both
+    // fire setDoc() — the second one lands after the first has already
+    // committed, so Firestore evaluates it as an UPDATE (not a CREATE),
+    // which requires isSuperUser() and fails "Missing or insufficient
+    // permissions" even though the rules and payload are both correct.
+    let provisioningInFlight = false;
     const myRef = doc(db, "users", authUid);
     const unsub = onSnapshot(
       myRef,
       async (snap) => {
         if (!snap.exists()) {
+          // Stand down if handleEmailSignUp is already writing this exact
+          // profile itself — see skipAutoProvisionRef's declaration for why.
+          if (skipAutoProvisionRef.current || provisioningInFlight) {
+            return;
+          }
+          provisioningInFlight = true;
           // First time this Firebase Auth account has been seen: self-provision
           // a PENDING profile (lowest privilege role). A Super Admin must then
           // review and activate it, exactly like a brand-new hire. This also
@@ -578,6 +606,8 @@ export default function App() {
             setAuthError("Could not create your staff profile. Please contact a Super Admin.");
             await signOut(auth).catch(() => {});
             setCurrentView("LOGIN");
+          } finally {
+            provisioningInFlight = false;
           }
           // Wait for the next snapshot (the doc we just created) to handle
           // messaging/sign-out uniformly via the PENDING branch below.
@@ -710,6 +740,15 @@ export default function App() {
       status: "PENDING"
     };
 
+    // Tell the "own profile" onSnapshot listener to stand down: it also
+    // self-provisions on first sight of a signed-in UID with no profile
+    // doc, and createUserWithEmailAndPassword() below signs the account in
+    // immediately (firing that listener) before our own setDoc a few lines
+    // down has a chance to run. Without this, both writes race for the same
+    // doc and whichever loses gets evaluated as an UPDATE instead of a
+    // CREATE, failing "Missing or insufficient permissions" even though
+    // the rules and payload are correct.
+    skipAutoProvisionRef.current = true;
     try {
       // 1. Create the real Firebase Auth account. If this fails, stop here —
       // there is no fallback path, so the Firestore profile below must not
@@ -741,6 +780,7 @@ export default function App() {
       }
       setAuthError(errMsg);
     } finally {
+      skipAutoProvisionRef.current = false;
       setAuthLoading(false);
     }
   };
